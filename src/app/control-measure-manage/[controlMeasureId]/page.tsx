@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { ControlMeasure, RiskCause, PotentialRisk, Goal, ControlMeasureTypeKey, AppUser } from '@/lib/types';
+import type { ControlMeasure, RiskCause, PotentialRisk, Goal, ControlMeasureTypeKey, AppUser, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from '@/lib/types';
 import { CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types';
 import { useForm, type SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -31,7 +31,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { getGoalById } from '@/services/goalService';
 import { getPotentialRiskById } from '@/services/potentialRiskService';
 import { getRiskCauseById } from '@/services/riskCauseService';
-import { addControlMeasure, getControlMeasureById as getControlMeasureByIdFromService, updateControlMeasure as updateControlMeasureInService } from '@/services/controlMeasureService';
+import { addControlMeasure, getControlMeasureById, updateControlMeasure as updateControlMeasureService } from '@/services/controlMeasureService';
 
 
 const controlMeasureFormSchema = z.object({
@@ -44,7 +44,7 @@ const controlMeasureFormSchema = z.object({
   responsiblePerson: z.string().nullable().optional(),
   deadline: z.date().nullable().optional(),
   budget: z.preprocess(
-    (val) => (val === "" || val === null || val === undefined ? null : Number(String(val).replace(/[^0-9.]/g, ''))), // Allow decimal for currency
+    (val) => (val === "" || val === null || val === undefined ? null : Number(String(val).replace(/[^0-9.]/g, ''))),
     z.number().positive("Anggaran harus angka positif jika diisi.").nullable().optional()
   ),
 });
@@ -62,8 +62,8 @@ export default function ManageControlMeasurePage() {
   const isCreatingNew = controlMeasureIdParam === 'new';
 
   const riskCauseIdQuery = searchParams.get('riskCauseId');
-  const potentialRiskIdQuery = searchParams.get('potentialRiskId');
-  const goalIdQuery = searchParams.get('goalId');
+  // const potentialRiskIdQuery = searchParams.get('potentialRiskId'); // Not directly used for fetching, derived from riskCause
+  // const goalIdQuery = searchParams.get('goalId'); // Not directly used for fetching, derived from potentialRisk
 
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -91,46 +91,47 @@ export default function ManageControlMeasurePage() {
     defaultValues: {
       controlType: 'Prv',
       description: "",
-      keyControlIndicator: null,
-      target: null,
-      responsiblePerson: null,
+      keyControlIndicator: "",
+      target: "",
+      responsiblePerson: "",
       deadline: null,
       budget: null,
     },
   });
 
-  const currentUserId = useMemo(() => currentUser?.uid || null, [currentUser]);
-  const currentPeriod = useMemo(() => appUser?.activePeriod || null, [appUser]);
-  const uprDisplayName = useMemo(() => appUser?.displayName || 'UPR...', [appUser]);
-
+  const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
+  const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
+  const uprDisplayName = useMemo(() => appUser?.displayName || "UPR...", [appUser]);
+  
   const returnPath = useMemo(() => {
     const fromQuery = searchParams.get('from');
     if (fromQuery) return fromQuery;
     
-    const rcId = currentControlMeasure?.riskCauseId || parentRiskCause?.id || riskCauseIdQuery;
-    if (rcId) return `/risk-cause-analysis/${rcId}`;
+    const rcIdForPath = currentControlMeasure?.riskCauseId || riskCauseIdQuery;
+    if (rcIdForPath) return `/risk-cause-analysis/${rcIdForPath}`;
     
     return '/risk-analysis'; 
-  }, [searchParams, currentControlMeasure, parentRiskCause, riskCauseIdQuery]);
+  }, [searchParams, currentControlMeasure, riskCauseIdQuery]);
 
-  const fetchData = useCallback(async () => {
+
+  const loadPageData = useCallback(async () => {
     let isActive = true;
-    if (!currentUserId || !currentPeriod || !isProfileComplete) {
-      if (!authLoading && !profileLoading && isActive) {
-        toast({ title: "Konteks Tidak Lengkap", description: "Sesi atau profil pengguna tidak lengkap. Harap muat ulang atau lengkapi profil.", variant: "destructive" });
-        router.push('/');
-      }
-      if (isActive) setPageIsLoading(false);
+    if (!currentUserId || !currentPeriod || !isProfileComplete || authLoading || profileLoading) {
+      console.log("[ManageCMPage] loadPageData: Waiting for auth/profile context or context missing. authLoading:", authLoading, "profileLoading:", profileLoading, "UserID:", currentUserId, "Period:", currentPeriod, "ProfileComplete:", isProfileComplete);
+      setPageIsLoading(true); // Ensure loading is true if context isn't fully ready
       return;
     }
-
-    console.log(`[ManageCMPage] fetchData called. isCreatingNew: ${isCreatingNew}, CM_ID: ${controlMeasureIdParam}, User: ${currentUserId}, Period: ${currentPeriod}`);
-    setPageIsLoading(true);
-    setCurrentControlMeasure(null);
-    setParentRiskCause(null);
-    setParentPotentialRisk(null);
-    setGrandParentGoal(null);
-    reset({ controlType: 'Prv', description: "", keyControlIndicator: null, target: null, responsiblePerson: null, deadline: null, budget: null });
+    console.log(`[ManageCMPage] loadPageData called. isCreatingNew: ${isCreatingNew}, CM_ID: ${controlMeasureIdParam}, User: ${currentUserId}, Period: ${currentPeriod}`);
+    
+    if(isActive) setPageIsLoading(true);
+    
+    if (isActive) {
+      setCurrentControlMeasure(null);
+      setParentRiskCause(null);
+      setParentPotentialRisk(null);
+      setGrandParentGoal(null);
+      reset({ controlType: 'Prv', description: "", keyControlIndicator: "", target: "", responsiblePerson: "", deadline: null, budget: null });
+    }
 
     try {
       let riskCauseForContext: RiskCause | null = null;
@@ -139,36 +140,36 @@ export default function ManageControlMeasurePage() {
       let controlToLoad: ControlMeasure | null = null;
       
       let actualRiskCauseId = riskCauseIdQuery;
-      let actualPotentialRiskId = potentialRiskIdQuery;
-      let actualGoalId = goalIdQuery;
 
       if (!isCreatingNew && controlMeasureIdParam) {
         console.log(`[ManageCMPage] Editing existing CM. Fetching CM by ID: ${controlMeasureIdParam}`);
-        controlToLoad = await getControlMeasureByIdFromService(controlMeasureIdParam, currentUserId, currentPeriod);
+        controlToLoad = await getControlMeasureById(controlMeasureIdParam, currentUserId, currentPeriod);
+        if (!isActive) return;
         if (!controlToLoad) throw new Error("Tindakan pengendalian tidak ditemukan atau tidak cocok konteks pengguna/periode.");
         if (isActive) setCurrentControlMeasure(controlToLoad);
         actualRiskCauseId = controlToLoad.riskCauseId;
-        actualPotentialRiskId = controlToLoad.potentialRiskId;
-        actualGoalId = controlToLoad.goalId;
       }
       
-      if (!actualRiskCauseId) throw new Error("ID Penyebab Risiko (riskCauseId) diperlukan dari query parameter untuk membuat pengendalian baru.");
+      if (!actualRiskCauseId) throw new Error("ID Penyebab Risiko (riskCauseId) diperlukan dari query parameter untuk membuat pengendalian baru atau mengedit.");
       console.log(`[ManageCMPage] Fetching parent RiskCause by ID: ${actualRiskCauseId}`);
       riskCauseForContext = await getRiskCauseById(actualRiskCauseId, currentUserId, currentPeriod);
+      if (!isActive) return;
       if (!riskCauseForContext) throw new Error(`Penyebab Risiko (ID: ${actualRiskCauseId}) tidak ditemukan atau tidak cocok konteks.`);
       if (isActive) setParentRiskCause(riskCauseForContext);
-      actualPotentialRiskId = riskCauseForContext.potentialRiskId; 
       
+      const actualPotentialRiskId = riskCauseForContext.potentialRiskId; 
       if (!actualPotentialRiskId) throw new Error("ID Potensi Risiko tidak valid dari Penyebab Risiko.");
       console.log(`[ManageCMPage] Fetching parent PotentialRisk by ID: ${actualPotentialRiskId}`);
       potentialRiskForContext = await getPotentialRiskById(actualPotentialRiskId, currentUserId, currentPeriod);
+      if (!isActive) return;
       if (!potentialRiskForContext) throw new Error(`Potensi Risiko Induk (ID: ${actualPotentialRiskId}) tidak ditemukan atau tidak cocok konteks.`);
       if (isActive) setParentPotentialRisk(potentialRiskForContext);
-      actualGoalId = potentialRiskForContext.goalId;
       
+      const actualGoalId = potentialRiskForContext.goalId;
       if (!actualGoalId) throw new Error("ID Sasaran tidak valid dari Potensi Risiko.");
       console.log(`[ManageCMPage] Fetching grandparent Goal by ID: ${actualGoalId}`);
       goalForContext = await getGoalById(actualGoalId, currentUserId, currentPeriod);
+      if (!isActive) return;
       if (!goalForContext) throw new Error(`Sasaran Induk (ID: ${actualGoalId}) tidak ditemukan atau tidak cocok konteks.`);
       if (isActive) setGrandParentGoal(goalForContext);
       
@@ -182,38 +183,40 @@ export default function ManageControlMeasurePage() {
           deadline: controlToLoad.deadline && isValidDate(parseISO(controlToLoad.deadline)) ? parseISO(controlToLoad.deadline) : null,
           budget: controlToLoad.budget || null,
         });
+      } else if (isCreatingNew && riskCauseForContext && isActive) {
+        const { level: riskLevel } = getCalculatedRiskLevel(riskCauseForContext.likelihood, riskCauseForContext.impact);
+        let defaultType: ControlMeasureTypeKey = 'Prv';
+        const guidance = getControlGuidance(riskLevel);
+        if (guidance.includes("Preventif") && guidance.includes("Mitigasi") && guidance.includes("Korektif")) defaultType = 'Prv';
+        else if (guidance.includes("Preventif") && guidance.includes("Mitigasi")) defaultType = 'Prv';
+        else if (guidance.includes("Preventif")) defaultType = 'Prv';
+        setValue('controlType', defaultType);
       }
-      console.log("[ManageCMPage] fetchData: Successfully loaded context data.");
+      console.log("[ManageCMPage] loadPageData: Successfully loaded context data.");
     } catch (error: any) {
       if (!isActive) return;
       const errorMessage = error.message || String(error);
-      console.error("[ManageCMPage] Error in fetchData:", errorMessage);
+      console.error("[ManageCMPage] Error in loadPageData:", errorMessage);
       toast({ title: "Kesalahan Memuat Data Halaman", description: errorMessage, variant: "destructive" });
       if (isActive) router.push(returnPath); 
     } finally {
       if (isActive) setPageIsLoading(false);
-      console.log("[ManageCMPage] fetchData: FINISHED, pageIsLoading set to", false);
+      console.log("[ManageCMPage] loadPageData: FINISHED, pageIsLoading set to", false);
     }
+
     return () => { isActive = false; };
   }, [
-      controlMeasureIdParam, isCreatingNew, riskCauseIdQuery, potentialRiskIdQuery, goalIdQuery,
-      currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading,
-      reset, router, toast, returnPath
+    controlMeasureIdParam, isCreatingNew, riskCauseIdQuery, 
+    currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading,
+    reset, router, toast, returnPath, setValue // Added setValue
   ]);
-
+  
   useEffect(() => {
-    let isActive = true;
     if (currentUserId && currentPeriod && isProfileComplete && !authLoading && !profileLoading) {
-        console.log("[ManageCMPage] useEffect: Context ready, calling fetchData.");
-        fetchData();
-    } else if (!authLoading && !profileLoading && (!currentUserId || !currentPeriod || !isProfileComplete)) {
-        console.warn("[ManageCMPage] useEffect: Context not ready, or profile incomplete. Not fetching.");
-        if(isActive) setPageIsLoading(false); 
+      loadPageData();
     }
-    return () => { isActive = false; };
-  }, [fetchData, currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading]);
-  
-  
+  }, [currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading, loadPageData]); // loadPageData added
+
   const processSave = async (formData: ControlMeasureFormData): Promise<ControlMeasure | null> => {
     if (!currentUserId || !currentPeriod) {
       toast({ title: "Konteks Pengguna/Periode Hilang", description: "Tidak dapat menyimpan. Harap muat ulang.", variant: "destructive" });
@@ -224,11 +227,22 @@ export default function ManageControlMeasurePage() {
       return null;
     }
 
-    const controlDataForService = {
-      ...formData,
+    const controlDataForService: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType'> = {
+      description: formData.description,
+      keyControlIndicator: formData.keyControlIndicator || null,
+      target: formData.target || null,
+      responsiblePerson: formData.responsiblePerson || null,
       deadline: formData.deadline ? formData.deadline.toISOString() : null,
       budget: formData.budget === null || isNaN(Number(formData.budget)) ? null : Number(formData.budget),
     };
+
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - controlDataForService:", JSON.stringify(controlDataForService, null, 2));
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - parentRiskCause.id:", parentRiskCause.id);
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - parentPotentialRisk.id:", parentPotentialRisk.id);
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - grandParentGoal.id:", grandParentGoal.id);
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - currentUserId:", currentUserId);
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - currentPeriod:", currentPeriod);
+    console.log("[ManageCMPage] Data to be passed to addControlMeasure - formData.controlType (passed as controlType arg):", formData.controlType);
 
     setIsSaving(true);
     let savedControl: ControlMeasure | null = null;
@@ -240,13 +254,18 @@ export default function ManageControlMeasurePage() {
           parentPotentialRisk.id,
           grandParentGoal.id,
           currentUserId,
-          currentPeriod
+          currentPeriod,
+          formData.controlType 
         );
       } else if (currentControlMeasure && currentControlMeasure.id) {
-        // Ensure we only pass fields defined in the form schema for update
-        const { controlType, description, keyControlIndicator, target, responsiblePerson, deadline, budget } = controlDataForService;
-        const updatePayload = { controlType, description, keyControlIndicator, target, responsiblePerson, deadline, budget };
-        savedControl = await updateControlMeasureInService(currentControlMeasure.id, updatePayload);
+        const updatePayload = {
+          controlType: formData.controlType, 
+          ...controlDataForService
+        };
+        await updateControlMeasureService(currentControlMeasure.id, updatePayload);
+        const fetchedUpdatedControl = await getControlMeasureById(currentControlMeasure.id, currentUserId, currentPeriod);
+        if (!fetchedUpdatedControl) throw new Error("Gagal mengambil data pengendalian setelah update.");
+        savedControl = fetchedUpdatedControl;
       } else {
         throw new Error("Konteks pengendalian tidak valid untuk disimpan.");
       }
@@ -262,19 +281,40 @@ export default function ManageControlMeasurePage() {
   };
   
   const handleFormSubmit = async (formData: ControlMeasureFormData) => {
+    console.log("[ManageCMPage] handleFormSubmit triggered. ActionType:", submitActionType, "isCreatingNew:", isCreatingNew);
     const savedControl = await processSave(formData);
     if (savedControl) {
-      toast({ title: isCreatingNew && submitActionType !== 'new' ? "Pengendalian Ditambahkan" : "Pengendalian Diperbarui", description: `Pengendalian "${formData.description}" telah disimpan.` });
+      toast({ 
+          title: isCreatingNew ? "Pengendalian Baru Disimpan" : "Pengendalian Diperbarui", 
+          description: `Pengendalian "${formData.description}" telah berhasil disimpan.` 
+      });
       
       if (submitActionType === 'close' || !isCreatingNew) {
         router.push(returnPath);
       } else if (submitActionType === 'new' && isCreatingNew) {
-        reset({ controlType: 'Prv', description: "", keyControlIndicator: null, target: null, responsiblePerson: null, deadline: null, budget: null });
-        // No need to re-fetch all controls here, new control is already added to store by addControlMeasure action
-        // The sequence number for the next "new" will be handled by the service
-        // However, we might want to update the URL to the new control's ID if we want to switch to "edit" mode for it,
-        // or just stay on the /new?riskCauseId=... page. For now, stay on /new.
-         router.replace(`/control-measure-manage/new?riskCauseId=${riskCauseIdQuery}&potentialRiskId=${potentialRiskIdQuery}&goalId=${goalIdQuery}&from=${encodeURIComponent(returnPath)}`);
+        reset({ 
+          controlType: 'Prv', 
+          description: "", 
+          keyControlIndicator: "", 
+          target: "", 
+          responsiblePerson: "", 
+          deadline: null, 
+          budget: null 
+        });
+        // Re-set default control type based on risk level for the new form
+        if(parentRiskCause){
+            const { level: riskLevel } = getCalculatedRiskLevel(parentRiskCause.likelihood, parentRiskCause.impact);
+            let defaultType: ControlMeasureTypeKey = 'Prv';
+            const guidance = getControlGuidance(riskLevel);
+            if (guidance.includes("Preventif") && guidance.includes("Mitigasi") && guidance.includes("Korektif")) defaultType = 'Prv';
+            else if (guidance.includes("Preventif") && guidance.includes("Mitigasi")) defaultType = 'Prv';
+            else if (guidance.includes("Preventif")) defaultType = 'Prv';
+            setValue('controlType', defaultType);
+        }
+        // No need to router.replace to /new, as we are already on /new or editing page
+        // If editing, this 'new' path won't be hit because the button is disabled.
+        // For /new, we just reset the form.
+        console.log("[ManageCMPage] Form reset for new control measure entry.");
       }
     }
     setSubmitActionType(null); 
@@ -286,7 +326,7 @@ export default function ManageControlMeasurePage() {
       return;
     }
     
-    const { level: riskCauseLevelText } = getCalculatedRiskLevel(parentRiskCause.likelihood, parentRiskCause.impact);
+    const { level: riskCauseLevelText, score: riskCauseScore } = getCalculatedRiskLevel(parentRiskCause.likelihood, parentRiskCause.impact);
     if (riskCauseLevelText === 'N/A' || !parentRiskCause.likelihood || !parentRiskCause.impact) {
         toast({ title: "Analisis Penyebab Belum Lengkap", description: "Harap lengkapi analisis Kemungkinan dan Dampak untuk penyebab risiko ini sebelum meminta saran pengendalian AI.", variant: "warning" });
         return;
@@ -312,11 +352,14 @@ export default function ManageControlMeasurePage() {
           setIsAISuggestionsModalOpen(true);
         }
       } else {
-        toast({ title: "Kesalahan Saran AI", description: result.error || "Gagal mendapatkan saran pengendalian dari AI.", variant: "destructive" });
+        const errorMsg = result.error || "Gagal mendapatkan saran pengendalian dari AI.";
+        console.error("[ManageCMPage] AI Suggestion Error:", errorMsg);
+        toast({ title: "Kesalahan Saran AI", description: errorMsg, variant: "destructive" });
       }
     } catch (error: any) {
       const errorMessage = error.message || String(error);
-      toast({ title: "Kesalahan AI", description: errorMessage, variant: "destructive" });
+      console.error("[ManageCMPage] AI Suggestion Exception:", errorMessage);
+      toast({ title: "Kesalahan AI Fatal", description: errorMessage, variant: "destructive" });
     } finally {
       setIsAISuggestionsLoading(false);
     }
@@ -330,6 +373,7 @@ export default function ManageControlMeasurePage() {
     setIsAISuggestionsModalOpen(false);
   };
 
+
   if (authLoading || profileLoading || pageIsLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen">
@@ -341,6 +385,20 @@ export default function ManageControlMeasurePage() {
     );
   }
   
+  if (!currentUser || !isProfileComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen">
+        <Info className="h-12 w-12 text-destructive mb-4" />
+        <p className="text-xl text-muted-foreground text-center">
+            { !currentUser ? "Sesi tidak ditemukan. Silakan login kembali." : "Profil Anda belum lengkap. Harap lengkapi di Pengaturan."}
+        </p>
+         <Button onClick={() => router.push(currentUser ? '/settings' : '/login')} variant="outline" className="mt-4">
+            <ArrowLeft className="mr-2 h-4 w-4" /> {currentUser ? "Ke Pengaturan" : "Ke Halaman Login"}
+        </Button>
+      </div>
+    );
+  }
+
   if ((isCreatingNew && (!riskCauseIdQuery || !parentRiskCause || !parentPotentialRisk || !grandParentGoal)) || 
       (!isCreatingNew && (!currentControlMeasure || !parentRiskCause || !parentPotentialRisk || !grandParentGoal))) {
      return (
@@ -348,7 +406,7 @@ export default function ManageControlMeasurePage() {
         <Info className="h-12 w-12 text-destructive mb-4" />
         <p className="text-xl text-muted-foreground text-center">
           Konteks data induk untuk tindakan pengendalian tidak lengkap atau tidak ditemukan.<br/>
-          Pastikan ID yang benar diteruskan atau data induk ada.
+          Pastikan ID yang benar diteruskan atau data induk ada untuk UPR: {uprDisplayName} dan Periode: {currentPeriod || '...'}.
         </p>
          <Button onClick={() => router.push(returnPath)} variant="outline" className="mt-4">
             <ArrowLeft className="mr-2 h-4 w-4" /> Kembali
@@ -363,11 +421,15 @@ export default function ManageControlMeasurePage() {
   
   const pageTitle = isCreatingNew 
     ? "Tambah Tindakan Pengendalian Baru" 
-    : `Edit Tindakan Pengendalian (${controlCodePrefix}.${currentControlMeasure?.sequenceNumber || '?'})`;
+    : `Edit Tindakan Pengendalian (${controlCodePrefix}${currentControlMeasure?.sequenceNumber ? `.${currentControlMeasure.sequenceNumber}`: ''})`;
   
   const goalCodeForDisplay = grandParentGoal?.code || 'S?';
   const potentialRiskCodeForDisplay = `${goalCodeForDisplay}.PR${parentPotentialRisk?.sequenceNumber || '?'}`;
   const riskCauseCodeForDisplay = `${potentialRiskCodeForDisplay}.PC${parentRiskCause?.sequenceNumber || '?'}`;
+  
+  const currentRiskCauseLevelData = parentRiskCause ? getCalculatedRiskLevel(parentRiskCause.likelihood, parentRiskCause.impact) : { level: 'N/A' as CalculatedRiskLevelCategory | 'N/A', score: null };
+  const controlGuidanceText = parentRiskCause ? getControlGuidance(currentRiskCauseLevelData.level) : "Tentukan tingkat risiko penyebab terlebih dahulu untuk mendapatkan panduan pengendalian.";
+  const isAIButtonDisabled = isAISuggestionsLoading || !parentRiskCause || !parentPotentialRisk || !grandParentGoal || (parentRiskCause && (currentRiskCauseLevelData.level === 'N/A' || !parentRiskCause.likelihood || !parentRiskCause.impact));
 
   return (
     <div className="space-y-6">
@@ -388,25 +450,33 @@ export default function ManageControlMeasurePage() {
             <p><strong>Sasaran ({goalCodeForDisplay}):</strong> {grandParentGoal?.name || 'Memuat...'}</p>
             <p><strong>Potensi Risiko ({potentialRiskCodeForDisplay}):</strong> {parentPotentialRisk?.description || 'Memuat...'}</p>
             <p><strong>Penyebab Risiko ({riskCauseCodeForDisplay}):</strong> {parentRiskCause?.description || 'Memuat...'}</p>
+            {parentRiskCause && (
+                <p><strong>Tingkat Risiko Penyebab: </strong> 
+                    <Badge className={`${getRiskLevelColor(currentRiskCauseLevelData.level)} text-xs ml-1`}>
+                        {currentRiskCauseLevelData.level === 'N/A' ? 'N/A' : `${currentRiskCauseLevelData.level} (${currentRiskCauseLevelData.score ?? 'N/A'})`}
+                    </Badge>
+                </p>
+            )}
           </CardDescription>
         </CardHeader>
       </Card>
 
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
             <CardTitle>Detail Tindakan Pengendalian</CardTitle>
             <Button
                 variant="outline"
                 size="sm"
                 onClick={handleGetAIControlSuggestions}
-                disabled={isAISuggestionsLoading || !parentRiskCause || !parentPotentialRisk || !grandParentGoal || (parentRiskCause && (!parentRiskCause.likelihood || !parentRiskCause.impact))}
-                className="text-xs"
+                disabled={isAIButtonDisabled}
+                className="text-xs mt-2 sm:mt-0"
+                type="button"
             >
                 {isAISuggestionsLoading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Wand2 className="mr-2 h-3 w-3" />} Brainstorm Kontrol (AI)
             </Button>
            </div>
-            {parentRiskCause && (!parentRiskCause.likelihood || !parentRiskCause.impact) && (
+            {parentRiskCause && (currentRiskCauseLevelData.level === 'N/A' || !parentRiskCause.likelihood || !parentRiskCause.impact) && (
                  <p className="text-xs text-muted-foreground mt-1">
                     <Info className="inline h-3 w-3 mr-1" />
                     Analisis Kemungkinan & Dampak pada penyebab risiko diperlukan untuk saran AI yang optimal.
@@ -421,6 +491,7 @@ export default function ManageControlMeasurePage() {
                 <Controller
                   name="controlType"
                   control={control}
+                  defaultValue={currentControlMeasure?.controlType || 'Prv'}
                   render={({ field }) => (
                     <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
                       <SelectTrigger id="controlType" className={errors.controlType ? "border-destructive" : ""}>
@@ -444,6 +515,7 @@ export default function ManageControlMeasurePage() {
                   {...register("responsiblePerson")}
                   placeholder="Contoh: Manajer SDM, Kepala Divisi TI"
                   disabled={isSaving}
+                  className={errors.responsiblePerson ? "border-destructive" : ""}
                 />
                  {errors.responsiblePerson && <p className="text-xs text-destructive mt-1">{errors.responsiblePerson.message}</p>}
               </div>
@@ -470,6 +542,7 @@ export default function ManageControlMeasurePage() {
                   {...register("keyControlIndicator")}
                   placeholder="Contoh: Persentase penyelesaian pelatihan"
                   disabled={isSaving}
+                  className={errors.keyControlIndicator ? "border-destructive" : ""}
                 />
                 {errors.keyControlIndicator && <p className="text-xs text-destructive mt-1">{errors.keyControlIndicator.message}</p>}
               </div>
@@ -481,6 +554,7 @@ export default function ManageControlMeasurePage() {
                   {...register("target")}
                   placeholder="Contoh: 100% pegawai mengikuti pelatihan"
                   disabled={isSaving}
+                   className={errors.target ? "border-destructive" : ""}
                 />
                 {errors.target && <p className="text-xs text-destructive mt-1">{errors.target.message}</p>}
               </div>
@@ -525,63 +599,55 @@ export default function ManageControlMeasurePage() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="budget">Anggaran (Rp)</Label>
-                <Input
-                  id="budget"
-                  type="text" 
-                  defaultValue={getValues("budget")?.toLocaleString('id-ID') || ""}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    const numericValue = parseInt(value.replace(/[^0-9]/g, ''), 10);
-                    if (!isNaN(numericValue)) {
-                      e.target.value = numericValue.toLocaleString('id-ID');
-                      setValue("budget", numericValue, {shouldValidate: true});
-                    } else if (value === "") {
-                       e.target.value = "";
-                       setValue("budget", null, {shouldValidate: true});
-                    } else {
-                        const currentBudget = getValues("budget");
-                        e.target.value = currentBudget?.toLocaleString('id-ID') || "";
-                    }
-                  }}
-                  onBlur={(e) => { 
-                    const value = getValues("budget");
-                    if (value !== null && value !== undefined) {
-                        e.target.value = value.toLocaleString('id-ID');
-                    } else {
-                        e.target.value = "";
-                    }
-                  }}
-                  placeholder="Contoh: 5.000.000"
-                  className={errors.budget ? "border-destructive" : ""}
-                  disabled={isSaving}
+                <Controller
+                    name="budget"
+                    control={control}
+                    render={({ field }) => (
+                        <Input
+                        id="budget"
+                        type="text" // Use text to allow formatting
+                        value={field.value === null || field.value === undefined ? "" : field.value.toLocaleString('id-ID')}
+                        onChange={(e) => {
+                            const rawValue = e.target.value.replace(/[^0-9]/g, '');
+                            const numericValue = rawValue === '' ? null : parseInt(rawValue, 10);
+                            field.onChange(numericValue); 
+                        }}
+                        placeholder="Contoh: 5.000.000"
+                        className={errors.budget ? "border-destructive" : ""}
+                        disabled={isSaving}
+                        />
+                    )}
                 />
                 {errors.budget && <p className="text-xs text-destructive mt-1">{errors.budget.message}</p>}
               </div>
             </div>
 
-            <div className="flex justify-end pt-4 space-x-2">
+            <div className="flex flex-col sm:flex-row justify-end pt-4 space-y-2 sm:space-y-0 sm:space-x-2">
               <Button 
                 type="button" 
                 variant="outline"
                 onClick={() => router.push(returnPath)} 
                 disabled={isSaving}
+                className="w-full sm:w-auto"
               >
                 Batal / Tutup
               </Button>
               <Button 
                 type="button" 
                 onClick={() => { setSubmitActionType('close'); handleSubmit(handleFormSubmit)(); }}
-                disabled={isSaving || !currentUser}
+                disabled={isSaving || !currentUser || !parentRiskCause}
+                className="w-full sm:w-auto"
               >
                 {isSaving && submitActionType === 'close' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                {isCreatingNew ? "Simpan & Tutup" : "Simpan Perubahan & Tutup"}
+                {isCreatingNew ? "Simpan & Tutup" : "Simpan Perubahan"}
               </Button>
               {isCreatingNew && (
                 <Button 
                   type="button" 
                   variant="secondary" 
                   onClick={() => { setSubmitActionType('new'); handleSubmit(handleFormSubmit)(); }}
-                  disabled={isSaving || !currentUser}
+                  disabled={isSaving || !currentUser || !parentRiskCause}
+                  className="w-full sm:w-auto"
                 >
                   {isSaving && submitActionType === 'new' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Simpan & Tambah Baru
