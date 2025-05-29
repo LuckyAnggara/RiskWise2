@@ -22,11 +22,10 @@ import {
   type SuggestKriToleranceOutput,
 } from "@/ai/flows/suggest-kri-tolerance-flow";
 import {
-  suggestControlMeasures as suggestControlMeasuresFlow,
-  type SuggestControlMeasuresInput,
-  type SuggestControlMeasuresOutput,
-  type AISuggestedControlMeasure,
-} from "@/ai/flows/suggest-control-measures-flow"; // Impor flow dan tipe baru
+  suggestControlMeasures as suggestControlMeasuresFlow, // Import the new flow
+  type SuggestControlMeasuresInput,                     // Import its input type
+  type SuggestControlMeasuresOutput                     // Import its output type
+} from "@/ai/flows/suggest-control-measures-flow"; 
 import { z } from "zod";
 import type { RiskCategory, RiskSource, ControlMeasureTypeKey, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from "@/lib/types";
 import { RISK_CATEGORIES, RISK_SOURCES, CONTROL_MEASURE_TYPE_KEYS, LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC } from "@/lib/types";
@@ -265,3 +264,5 @@ export async function suggestControlMeasuresAction(
     };
   }
 }
+
+    
