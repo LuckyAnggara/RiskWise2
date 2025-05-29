@@ -20,10 +20,16 @@ import {
   suggestKriAndTolerance as suggestKriToleranceFlow,
   type SuggestKriToleranceInput,
   type SuggestKriToleranceOutput,
-} from "@/ai/flows/suggest-kri-tolerance-flow"; // Impor flow baru
+} from "@/ai/flows/suggest-kri-tolerance-flow";
+import {
+  suggestControlMeasures as suggestControlMeasuresFlow,
+  type SuggestControlMeasuresInput,
+  type SuggestControlMeasuresOutput,
+  type AISuggestedControlMeasure,
+} from "@/ai/flows/suggest-control-measures-flow"; // Impor flow dan tipe baru
 import { z } from "zod";
-import type { RiskCategory, RiskSource } from "@/lib/types";
-import { RISK_CATEGORIES, RISK_SOURCES } from "@/lib/types";
+import type { RiskCategory, RiskSource, ControlMeasureTypeKey, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from "@/lib/types";
+import { RISK_CATEGORIES, RISK_SOURCES, CONTROL_MEASURE_TYPE_KEYS, LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC } from "@/lib/types";
 
 
 const BrainstormPotentialRisksActionInputSchema = z.object({
@@ -199,6 +205,63 @@ export async function suggestKriToleranceAction(
     return { 
         success: false, 
         error: `Gagal mendapatkan saran KRI/Toleransi dari AI: ${errorMessage}`
+    };
+  }
+}
+
+
+// Schema for SuggestControlMeasures Action
+const SuggestControlMeasuresActionInputSchema = z.object({
+  riskCauseDescription: z.string().min(5, "Deskripsi penyebab risiko minimal 5 karakter."),
+  parentPotentialRiskDescription: z.string().min(5, "Deskripsi potensi risiko induk minimal 5 karakter."),
+  grandParentGoalDescription: z.string().min(5, "Deskripsi sasaran minimal 5 karakter."),
+  riskCauseLevelText: z.custom<CalculatedRiskLevelCategory | 'N/A'>(
+    (val) => typeof val === 'string' && (['Sangat Rendah', 'Rendah', 'Sedang', 'Tinggi', 'Sangat Tinggi', 'N/A'] as (CalculatedRiskLevelCategory | 'N/A')[]).includes(val as CalculatedRiskLevelCategory | 'N/A'),
+    { message: "Tingkat risiko penyebab tidak valid." }
+  ),
+  riskCauseLikelihood: z.custom<LikelihoodLevelDesc>().nullable().refine(val => val === null || LIKELIHOOD_LEVELS_DESC.includes(val as LikelihoodLevelDesc), {
+    message: "Level kemungkinan penyebab tidak valid.",
+  }),
+  riskCauseImpact: z.custom<ImpactLevelDesc>().nullable().refine(val => val === null || IMPACT_LEVELS_DESC.includes(val as ImpactLevelDesc), {
+    message: "Level dampak penyebab tidak valid.",
+  }),
+});
+
+export async function suggestControlMeasuresAction(
+  values: z.infer<typeof SuggestControlMeasuresActionInputSchema>
+): Promise<{ success: boolean; data?: SuggestControlMeasuresOutput; error?: string }> {
+  const validatedFields = SuggestControlMeasuresActionInputSchema.safeParse(values);
+
+  if (!validatedFields.success) {
+    let errorMessages = "";
+    for (const fieldError of Object.values(validatedFields.error.flatten().fieldErrors)) {
+        if (fieldError && fieldError.length > 0) {
+            errorMessages += fieldError.join(", ") + " ";
+        }
+    }
+    return {
+      success: false,
+      error: errorMessages.trim() || "Input tidak valid untuk saran tindakan pengendalian.",
+    };
+  }
+
+  try {
+    const input: SuggestControlMeasuresInput = {
+      riskCauseDescription: validatedFields.data.riskCauseDescription,
+      parentPotentialRiskDescription: validatedFields.data.parentPotentialRiskDescription,
+      grandParentGoalDescription: validatedFields.data.grandParentGoalDescription,
+      riskCauseLevelText: validatedFields.data.riskCauseLevelText,
+      riskCauseLikelihood: validatedFields.data.riskCauseLikelihood,
+      riskCauseImpact: validatedFields.data.riskCauseImpact,
+    };
+    const output = await suggestControlMeasuresFlow(input);
+    return { success: true, data: output };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Error in suggestControlMeasuresAction:", errorMessage);
+    return { 
+        success: false, 
+        error: `Gagal mendapatkan saran tindakan pengendalian dari AI: ${errorMessage}`
     };
   }
 }
