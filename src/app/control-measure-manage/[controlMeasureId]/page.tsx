@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import type { ControlMeasure, RiskCause, PotentialRisk, Goal, ControlMeasureTypeKey, AppUser } from '@/lib/types';
-import { CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types'; // Removed getCalculatedRiskLevel from here
+import { CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types';
 import { useForm, type SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -24,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { format, parseISO, isValid as isValidDate, startOfToday } from 'date-fns';
 import { getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance } from '@/app/risk-cause-analysis/[riskCauseId]/page'; // Import shared functions
 import { suggestControlMeasuresAction } from '@/app/actions';
-import { ControlMeasureAISuggestionsModal, type AISuggestedControlMeasure } from '@/components/risks/control-measure-ai-suggestions-modal'; // CORRECTED IMPORT PATH
+import { ControlMeasureAISuggestionsModal, type AISuggestedControlMeasure } from '@/components/risks/control-measure-ai-suggestions-modal';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 import { getGoalById } from '@/services/goalService';
@@ -43,7 +44,7 @@ const controlMeasureFormSchema = z.object({
   responsiblePerson: z.string().nullable().optional(),
   deadline: z.date().nullable().optional(),
   budget: z.preprocess(
-    (val) => (val === "" || val === null || val === undefined ? null : Number(String(val).replace(/[^0-9]/g, ''))),
+    (val) => (val === "" || val === null || val === undefined ? null : Number(String(val).replace(/[^0-9.]/g, ''))), // Allow decimal for currency
     z.number().positive("Anggaran harus angka positif jika diisi.").nullable().optional()
   ),
 });
@@ -54,7 +55,7 @@ export default function ManageControlMeasurePage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  const { currentUser, appUser, loading: authLoading, profileLoading, isProfileComplete, refreshAppUser } = useAuth();
+  const { currentUser, appUser, loading: authLoading, profileLoading, isProfileComplete } = useAuth();
   const { toast } = useToast();
 
   const controlMeasureIdParam = params.controlMeasureId as string;
@@ -66,6 +67,7 @@ export default function ManageControlMeasurePage() {
 
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [submitActionType, setSubmitActionType] = useState<'close' | 'new' | null>(null);
   
   const [currentControlMeasure, setCurrentControlMeasure] = useState<ControlMeasure | null>(null);
   const [parentRiskCause, setParentRiskCause] = useState<RiskCause | null>(null);
@@ -75,8 +77,6 @@ export default function ManageControlMeasurePage() {
   const [isAISuggestionsModalOpen, setIsAISuggestionsModalOpen] = useState(false);
   const [aiControlSuggestions, setAiControlSuggestions] = useState<AISuggestedControlMeasure[]>([]);
   const [isAISuggestionsLoading, setIsAISuggestionsLoading] = useState(false);
-  const [submitActionType, setSubmitActionType] = useState<'close' | 'new' | null>(null);
-
 
   const {
     register,
@@ -148,7 +148,6 @@ export default function ManageControlMeasurePage() {
         if (!controlToLoad) throw new Error("Tindakan pengendalian tidak ditemukan atau tidak cocok konteks pengguna/periode.");
         if (isActive) setCurrentControlMeasure(controlToLoad);
         actualRiskCauseId = controlToLoad.riskCauseId;
-        // ID lain (potentialRiskId, goalId) sudah ada di controlToLoad, tidak perlu di-override dari query param jika edit.
         actualPotentialRiskId = controlToLoad.potentialRiskId;
         actualGoalId = controlToLoad.goalId;
       }
@@ -177,11 +176,11 @@ export default function ManageControlMeasurePage() {
         reset({
           controlType: controlToLoad.controlType,
           description: controlToLoad.description,
-          keyControlIndicator: controlToLoad.keyControlIndicator || null,
-          target: controlToLoad.target || null,
-          responsiblePerson: controlToLoad.responsiblePerson || null,
+          keyControlIndicator: controlToLoad.keyControlIndicator || "",
+          target: controlToLoad.target || "",
+          responsiblePerson: controlToLoad.responsiblePerson || "",
           deadline: controlToLoad.deadline && isValidDate(parseISO(controlToLoad.deadline)) ? parseISO(controlToLoad.deadline) : null,
-          budget: controlToLoad.budget,
+          budget: controlToLoad.budget || null,
         });
       }
       console.log("[ManageCMPage] fetchData: Successfully loaded context data.");
@@ -199,7 +198,7 @@ export default function ManageControlMeasurePage() {
   }, [
       controlMeasureIdParam, isCreatingNew, riskCauseIdQuery, potentialRiskIdQuery, goalIdQuery,
       currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading,
-      reset, router, toast, returnPath // returnPath should be stable due to useMemo
+      reset, router, toast, returnPath
   ]);
 
   useEffect(() => {
@@ -209,10 +208,10 @@ export default function ManageControlMeasurePage() {
         fetchData();
     } else if (!authLoading && !profileLoading && (!currentUserId || !currentPeriod || !isProfileComplete)) {
         console.warn("[ManageCMPage] useEffect: Context not ready, or profile incomplete. Not fetching.");
-        if(isActive) setPageIsLoading(false); // Ensure loading stops if context not ready
+        if(isActive) setPageIsLoading(false); 
     }
     return () => { isActive = false; };
-  }, [fetchData, currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading]); // fetchData is now a dependency
+  }, [fetchData, currentUserId, currentPeriod, isProfileComplete, authLoading, profileLoading]);
   
   
   const processSave = async (formData: ControlMeasureFormData): Promise<ControlMeasure | null> => {
@@ -235,21 +234,19 @@ export default function ManageControlMeasurePage() {
     let savedControl: ControlMeasure | null = null;
     try {
       if (isCreatingNew) {
-        // Logic to get sequenceNumber from store or service
-        const existingControls = await getControlMeasuresByRiskCauseId(parentRiskCause.id, currentUserId, currentPeriod);
-        const sequenceNumber = (existingControls.filter(c => c.controlType === formData.controlType).length) + 1;
-        
         savedControl = await addControlMeasure(
           controlDataForService,
           parentRiskCause.id,
           parentPotentialRisk.id,
           grandParentGoal.id,
           currentUserId,
-          currentPeriod,
-          sequenceNumber
+          currentPeriod
         );
       } else if (currentControlMeasure && currentControlMeasure.id) {
-        savedControl = await updateControlMeasureInService(currentControlMeasure.id, controlDataForService);
+        // Ensure we only pass fields defined in the form schema for update
+        const { controlType, description, keyControlIndicator, target, responsiblePerson, deadline, budget } = controlDataForService;
+        const updatePayload = { controlType, description, keyControlIndicator, target, responsiblePerson, deadline, budget };
+        savedControl = await updateControlMeasureInService(currentControlMeasure.id, updatePayload);
       } else {
         throw new Error("Konteks pengendalian tidak valid untuk disimpan.");
       }
@@ -265,18 +262,19 @@ export default function ManageControlMeasurePage() {
   };
   
   const handleFormSubmit = async (formData: ControlMeasureFormData) => {
-    const saved = await processSave(formData);
-    if (saved) {
+    const savedControl = await processSave(formData);
+    if (savedControl) {
       toast({ title: isCreatingNew && submitActionType !== 'new' ? "Pengendalian Ditambahkan" : "Pengendalian Diperbarui", description: `Pengendalian "${formData.description}" telah disimpan.` });
+      
       if (submitActionType === 'close' || !isCreatingNew) {
         router.push(returnPath);
-      } else if (submitActionType === 'new' && isCreatingNew) { // Ensure this only happens when creating new
+      } else if (submitActionType === 'new' && isCreatingNew) {
         reset({ controlType: 'Prv', description: "", keyControlIndicator: null, target: null, responsiblePerson: null, deadline: null, budget: null });
-        // We need to ensure the next sequence number will be correct, refetching controls for the parent cause is good.
-        if(parentRiskCause && currentUserId && currentPeriod) {
-          // await store.fetchControlMeasures(currentUserId, currentPeriod, parentRiskCause.id); // If using store
-          // For now, let's assume next add will correctly calculate sequence based on Firestore data
-        }
+        // No need to re-fetch all controls here, new control is already added to store by addControlMeasure action
+        // The sequence number for the next "new" will be handled by the service
+        // However, we might want to update the URL to the new control's ID if we want to switch to "edit" mode for it,
+        // or just stay on the /new?riskCauseId=... page. For now, stay on /new.
+         router.replace(`/control-measure-manage/new?riskCauseId=${riskCauseIdQuery}&potentialRiskId=${potentialRiskIdQuery}&goalId=${goalIdQuery}&from=${encodeURIComponent(returnPath)}`);
       }
     }
     setSubmitActionType(null); 
@@ -307,8 +305,12 @@ export default function ManageControlMeasurePage() {
       });
 
       if (result.success && result.data && result.data.suggestedControls) {
-        setAiControlSuggestions(result.data.suggestedControls);
-        setIsAISuggestionsModalOpen(true);
+        if (result.data.suggestedControls.length === 0) {
+          toast({ title: "Tidak Ada Saran AI", description: "AI tidak memberikan saran pengendalian untuk konteks ini.", variant: "default" });
+        } else {
+          setAiControlSuggestions(result.data.suggestedControls);
+          setIsAISuggestionsModalOpen(true);
+        }
       } else {
         toast({ title: "Kesalahan Saran AI", description: result.error || "Gagal mendapatkan saran pengendalian dari AI.", variant: "destructive" });
       }
@@ -321,8 +323,10 @@ export default function ManageControlMeasurePage() {
   };
 
   const handleApplyAISuggestion = (suggestion: AISuggestedControlMeasure) => {
-    setValue('description', suggestion.description, { shouldValidate: true });
+    setValue('description', suggestion.description || "", { shouldValidate: true });
     setValue('controlType', suggestion.suggestedControlType, { shouldValidate: true });
+    setValue('keyControlIndicator', suggestion.suggestedKCI || "", { shouldValidate: true });
+    setValue('target', suggestion.suggestedTarget || "", { shouldValidate: true });
     setIsAISuggestionsModalOpen(false);
   };
 
@@ -353,9 +357,9 @@ export default function ManageControlMeasurePage() {
     );
   }
   
-  const controlCodePrefix = parentRiskCause?.code 
-    ? `${parentRiskCause.code}.${getValues("controlType")}` 
-    : `${grandParentGoal?.code || 'S?'}.PR${parentPotentialRisk?.sequenceNumber || '?'}.PC${parentRiskCause?.sequenceNumber || '?'}.${getValues("controlType")}`;
+  const controlCodePrefix = parentRiskCause?.sequenceNumber && parentPotentialRisk?.sequenceNumber && grandParentGoal?.code
+    ? `${grandParentGoal.code}.PR${parentPotentialRisk.sequenceNumber}.PC${parentRiskCause.sequenceNumber}.${getValues("controlType")}` 
+    : `...${getValues("controlType")}`;
   
   const pageTitle = isCreatingNew 
     ? "Tambah Tindakan Pengendalian Baru" 
@@ -510,7 +514,7 @@ export default function ManageControlMeasurePage() {
                             selected={field.value}
                             onSelect={field.onChange}
                             initialFocus
-                            fromDate={startOfToday()} // Prevent selecting past dates
+                            fromDate={startOfToday()}
                         />
                         </PopoverContent>
                     </Popover>
@@ -535,12 +539,11 @@ export default function ManageControlMeasurePage() {
                        e.target.value = "";
                        setValue("budget", null, {shouldValidate: true});
                     } else {
-                        // If not a number and not empty, revert to previous valid number or empty
                         const currentBudget = getValues("budget");
                         e.target.value = currentBudget?.toLocaleString('id-ID') || "";
                     }
                   }}
-                  onBlur={(e) => { // Ensure formatting on blur
+                  onBlur={(e) => { 
                     const value = getValues("budget");
                     if (value !== null && value !== undefined) {
                         e.target.value = value.toLocaleString('id-ID');

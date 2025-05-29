@@ -22,6 +22,8 @@ export interface AISuggestedControlMeasure {
   description: string;
   suggestedControlType: ControlMeasureTypeKey;
   justification: string;
+  suggestedKCI: string | null;
+  suggestedTarget: string | null;
 }
 
 interface ControlMeasureAISuggestionsModalProps {
@@ -44,11 +46,11 @@ export function ControlMeasureAISuggestionsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg md:max-w-xl">
+      <DialogContent className="sm:max-w-lg md:max-w-xl lg:max-w-2xl"> {/* Wider modal */}
         <DialogHeader>
           <DialogTitle>Saran Tindakan Pengendalian dari AI</DialogTitle>
           <DialogDescription>
-            Berikut adalah beberapa saran tindakan pengendalian berdasarkan konteks risiko. Pilih salah satu untuk diterapkan ke formulir.
+            Berikut adalah beberapa saran tindakan pengendalian, KCI, dan Target berdasarkan konteks risiko. Pilih salah satu untuk diterapkan ke formulir.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] p-1 pr-3">
@@ -59,24 +61,42 @@ export function ControlMeasureAISuggestionsModal({
               suggestions.map((suggestion, index) => (
                 <Alert key={index} className="flex flex-col items-start">
                   <div className="flex w-full items-start">
-                    <Wand2 className="h-5 w-5 mr-3 mt-1 flex-shrink-0" />
+                    <Wand2 className="h-5 w-5 mr-3 mt-1 flex-shrink-0 text-primary" />
                     <div className="flex-grow">
-                      <AlertTitle className="font-semibold mb-1">Saran #{index + 1}: <Badge variant="outline" className="ml-1 text-xs">{getControlTypeName(suggestion.suggestedControlType)} ({suggestion.suggestedControlType})</Badge></AlertTitle>
-                      <AlertDescription className="text-sm space-y-1">
-                        <p><strong>Deskripsi:</strong> {suggestion.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          <strong>Justifikasi:</strong> {suggestion.justification}
-                        </p>
+                      <AlertTitle className="font-semibold mb-1">
+                        Saran #{index + 1}: <Badge variant="outline" className="ml-1 text-xs">{getControlTypeName(suggestion.suggestedControlType)} ({suggestion.suggestedControlType})</Badge>
+                      </AlertTitle>
+                      <AlertDescription className="text-sm space-y-2">
+                        <div>
+                          <p className="font-medium">Deskripsi Pengendalian:</p>
+                          <p>{suggestion.description}</p>
+                        </div>
+                        {suggestion.suggestedKCI && (
+                          <div>
+                            <p className="font-medium">Saran KCI:</p>
+                            <p>{suggestion.suggestedKCI}</p>
+                          </div>
+                        )}
+                        {suggestion.suggestedTarget && (
+                           <div>
+                            <p className="font-medium">Saran Target KCI:</p>
+                            <p>{suggestion.suggestedTarget}</p>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium text-xs text-muted-foreground">Justifikasi Pengendalian:</p>
+                          <p className="text-xs text-muted-foreground">{suggestion.justification}</p>
+                        </div>
                       </AlertDescription>
                     </div>
                   </div>
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    className="mt-2 self-end text-xs" 
+                    className="mt-3 self-end text-xs" 
                     onClick={() => {
                       onApplySuggestion(suggestion);
-                      onOpenChange(false);
+                      onOpenChange(false); // Close modal after applying
                     }}
                   >
                     <CheckCircle className="mr-2 h-3 w-3"/> Terapkan Saran Ini
@@ -86,7 +106,7 @@ export function ControlMeasureAISuggestionsModal({
             )}
           </div>
         </ScrollArea>
-        <DialogFooter className="sm:justify-end">
+        <DialogFooter className="sm:justify-end mt-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Tutup
           </Button>

@@ -22,9 +22,9 @@ import {
   type SuggestKriToleranceOutput,
 } from "@/ai/flows/suggest-kri-tolerance-flow";
 import {
-  suggestControlMeasures as suggestControlMeasuresFlow, // Import the new flow
-  type SuggestControlMeasuresInput,                     // Import its input type
-  type SuggestControlMeasuresOutput                     // Import its output type
+  suggestControlMeasures as suggestControlMeasuresFlow,
+  type SuggestControlMeasuresInput,
+  type SuggestControlMeasuresOutput
 } from "@/ai/flows/suggest-control-measures-flow"; 
 import { z } from "zod";
 import type { RiskCategory, RiskSource, ControlMeasureTypeKey, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from "@/lib/types";
@@ -233,10 +233,15 @@ export async function suggestControlMeasuresAction(
 
   if (!validatedFields.success) {
     let errorMessages = "";
-    for (const fieldError of Object.values(validatedFields.error.flatten().fieldErrors)) {
-        if (fieldError && fieldError.length > 0) {
-            errorMessages += fieldError.join(", ") + " ";
-        }
+    // Menggabungkan semua pesan error dari validasi Zod
+    Object.values(validatedFields.error.flatten().fieldErrors).forEach(fieldErrors => {
+      if (fieldErrors && fieldErrors.length > 0) {
+        errorMessages += fieldErrors.join(", ") + " ";
+      }
+    });
+    // Error bentuk umum jika ada
+    if (validatedFields.error.flatten().formErrors.length > 0) {
+      errorMessages += validatedFields.error.flatten().formErrors.join(", ") + " ";
     }
     return {
       success: false,
@@ -264,5 +269,3 @@ export async function suggestControlMeasuresAction(
     };
   }
 }
-
-    
