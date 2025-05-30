@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -8,105 +9,158 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == docData.userId;
     }
 
-    // Memastikan field yang tidak boleh diubah (immutable) tidak diubah saat update
-    function isNotUpdatingImmutableFieldsForUser(requestData, resourceData) {
-      return requestData.uid == resourceData.uid &&
-             requestData.role == resourceData.role &&
-             requestData.createdAt == resourceData.createdAt;
-             // uprId dan displayName sekarang bisa diubah, jadi dihapus dari sini
+    function isUserProfileOwner(userIdDoc) {
+      return request.auth != null && request.auth.uid == userIdDoc;
     }
 
-    function hasRequiredGoalFields(data) {
-      return data.name != null && data.name != "" &&
-             data.code != null && data.code != "" &&
-             data.uprId != null && data.uprId != "" && // uprId di goal harus ada
-             data.period != null && data.period != "" &&
-             data.userId == request.auth.uid &&
-             data.createdAt == request.time;
-    }
-    
-    function isGoalOwner(goalId) {
-        return get(/databases/$(database)/documents/goals/$(goalId)).data.userId == request.auth.uid;
-    }
-
-    // Aturan untuk Koleksi 'users'
+    // Users collection
     match /users/{userIdDoc} {
-      allow read: if request.auth != null; // Atau if request.auth.uid == userIdDoc; untuk lebih ketat
-
+      allow read: if request.auth != null; // Allow authenticated users to read any profile for now
       allow create: if request.auth != null &&
-                       request.auth.uid == userIdDoc && // ID dokumen harus sama dengan UID pengguna yang login
-                       request.resource.data.uid == request.auth.uid && // Field 'uid' dalam data harus sama
-                       request.resource.data.displayName != null && request.resource.data.displayName != "" &&
-                       request.resource.data.uprId == request.resource.data.displayName && // uprId harus sama dengan displayName
-                       request.resource.data.role != null && 
-                       (request.resource.data.role == 'userSatker' || request.resource.data.role == 'admin') &&
-                       request.resource.data.createdAt == request.time; // serverTimestamp
+                       request.auth.uid == userIdDoc && // Document ID must be user's UID
+                       request.resource.data.uid == request.auth.uid &&
+                       request.resource.data.email != null && 
+                       request.resource.data.displayName != null &&
+                       request.resource.data.role != null && (request.resource.data.role == 'userSatker' || request.resource.data.role == 'admin') &&
+                       request.resource.data.uprId == request.resource.data.displayName && // uprId must be same as displayName
+                       (request.resource.data.activePeriod == null || request.resource.data.activePeriod is string) &&
+                       (request.resource.data.availablePeriods == null || request.resource.data.availablePeriods is list) &&
+                       (request.resource.data.riskAppetite == null || request.resource.data.riskAppetite is number);
+                       // createdAt will be handled by serverTimestamp()
 
-      allow update: if request.auth != null &&
-                       request.auth.uid == userIdDoc && // Hanya pemilik yang bisa update
-                       isNotUpdatingImmutableFieldsForUser(request.resource.data, resource.data) &&
-                       // Pastikan jika displayName diubah, uprId juga diubah dan cocok
-                       (request.resource.data.displayName == resource.data.displayName || request.resource.data.uprId == request.resource.data.displayName) &&
-                       // Pastikan jika displayName tidak diubah, uprId juga tidak berubah atau cocok
-                       (request.resource.data.displayName != resource.data.displayName || request.resource.data.uprId == resource.data.uprId);
-
-
-      allow delete: if false; // Pengguna tidak bisa menghapus profil mereka sendiri
+      allow update: if isUserProfileOwner(userIdDoc) &&
+                       // Fields that cannot be changed by user after creation
+                       request.resource.data.uid == resource.data.uid &&
+                       request.resource.data.email == resource.data.email && // Usually email is not changed by user directly
+                       request.resource.data.role == resource.data.role &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       // displayName can be updated, and if so, uprId must also be updated to match
+                       (request.resource.data.displayName == resource.data.displayName || request.resource.data.uprId == request.resource.data.displayName);
+      allow delete: if false; // Generally, users should not delete their own accounts directly
     }
 
-    // Aturan untuk Koleksi 'goals'
+    // Goals collection
     match /goals/{goalId} {
-      allow read: if request.auth != null; // Semua pengguna terautentikasi bisa baca (filter UPR di client)
-      allow list: if request.auth != null; // Izinkan kueri daftar
-
+      allow read, list: if request.auth != null; // Allow authenticated users to read/list goals
+                                          // Client-side will filter by userId and period
       allow create: if request.auth != null &&
-                       hasRequiredGoalFields(request.resource.data) &&
-                       // Pastikan uprId pada goal cocok dengan uprId (displayName) pengguna yang membuat
-                       request.resource.data.uprId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uprId;
-                       
-      allow update: if request.auth != null && isOwner(resource.data) &&
-                       request.resource.data.name != null && request.resource.data.name != "" &&
-                       request.resource.data.userId == resource.data.userId && // Tidak bisa ganti pemilik
-                       request.resource.data.uprId == resource.data.uprId &&   // Tidak bisa ganti UPR
-                       request.resource.data.period == resource.data.period && // Tidak bisa ganti Periode
-                       request.resource.data.code == resource.data.code &&     // Tidak bisa ganti kode
-                       request.resource.data.createdAt == resource.data.createdAt; // Tidak bisa ganti tanggal dibuat
-                       
-      allow delete: if request.auth != null && isOwner(resource.data);
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.period != null && request.resource.data.period is string &&
+                       request.resource.data.name != null && request.resource.data.name is string &&
+                       request.resource.data.code != null && request.resource.data.code is string;
+                       // createdAt by serverTimestamp
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid &&
+                       // Immutable fields after creation by user:
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.period == resource.data.period &&
+                       request.resource.data.code == resource.data.code &&
+                       request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
-    // Aturan untuk Subkoleksi (atau koleksi top-level jika Anda memilih struktur itu)
-    // Contoh untuk potentialRisks (asumsikan koleksi top-level dengan goalId)
-    match /potentialRisks/{prId} {
+    // PotentialRisks collection
+    match /potentialRisks/{potentialRiskId} {
       allow read, list: if request.auth != null;
       allow create: if request.auth != null &&
                        request.resource.data.userId == request.auth.uid &&
-                       request.resource.data.goalId != null &&
-                       request.resource.data.uprId == get(/databases/$(database)/documents/goals/$(request.resource.data.goalId)).data.uprId &&
-                       request.resource.data.period == get(/databases/$(database)/documents/goals/$(request.resource.data.goalId)).data.period &&
+                       request.resource.data.period != null && request.resource.data.period is string &&
+                       request.resource.data.goalId != null && request.resource.data.goalId is string &&
                        exists(/databases/$(database)/documents/goals/$(request.resource.data.goalId)) &&
-                       isGoalOwner(request.resource.data.goalId); // Hanya pemilik Goal yang bisa tambah PotentialRisk
-
-      allow update: if request.auth != null && isOwner(resource.data) &&
+                       get(/databases/$(database)/documents/goals/$(request.resource.data.goalId)).data.userId == request.auth.uid &&
+                       get(/databases/$(database)/documents/goals/$(request.resource.data.goalId)).data.period == request.resource.data.period;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid &&
+                       // Immutable fields
                        request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.period == resource.data.period &&
                        request.resource.data.goalId == resource.data.goalId &&
-                       request.resource.data.uprId == resource.data.uprId &&
-                       request.resource.data.period == resource.data.period;
-                       
-      allow delete: if request.auth != null && isOwner(resource.data);
+                       request.resource.data.sequenceNumber == resource.data.sequenceNumber &&
+                       request.resource.data.identifiedAt == resource.data.identifiedAt;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
-    // TODO: Tambahkan aturan serupa untuk riskCauses dan controlMeasures
-    // Sesuaikan path jika mereka adalah subkoleksi
+    // RiskCauses collection
+    match /riskCauses/{riskCauseId} {
+      allow read, list: if request.auth != null;
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.period != null && request.resource.data.period is string &&
+                       request.resource.data.potentialRiskId != null && request.resource.data.potentialRiskId is string &&
+                       exists(/databases/$(database)/documents/potentialRisks/$(request.resource.data.potentialRiskId)) &&
+                       get(/databases/$(database)/documents/potentialRisks/$(request.resource.data.potentialRiskId)).data.userId == request.auth.uid &&
+                       get(/databases/$(database)/documents/potentialRisks/$(request.resource.data.potentialRiskId)).data.period == request.resource.data.period;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid &&
+                       // Immutable fields
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.period == resource.data.period &&
+                       request.resource.data.potentialRiskId == resource.data.potentialRiskId &&
+                       request.resource.data.goalId == resource.data.goalId &&
+                       request.resource.data.sequenceNumber == resource.data.sequenceNumber &&
+                       request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
 
-    // Default deny all (jika tidak ada aturan di atas yang cocok)
-    // match /{document=**} {
-    //   allow read, write: if false;
-    // }
+    // ControlMeasures collection
+    match /controlMeasures/{controlMeasureId} {
+      allow read, list: if request.auth != null;
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.period != null && request.resource.data.period is string &&
+                       request.resource.data.riskCauseId != null && request.resource.data.riskCauseId is string &&
+                       exists(/databases/$(database)/documents/riskCauses/$(request.resource.data.riskCauseId)) &&
+                       get(/databases/$(database)/documents/riskCauses/$(request.resource.data.riskCauseId)).data.userId == request.auth.uid &&
+                       get(/databases/$(database)/documents/riskCauses/$(request.resource.data.riskCauseId)).data.period == request.resource.data.period;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid &&
+                       // Immutable fields
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.period == resource.data.period &&
+                       request.resource.data.riskCauseId == resource.data.riskCauseId &&
+                       request.resource.data.potentialRiskId == resource.data.potentialRiskId &&
+                       request.resource.data.goalId == resource.data.goalId &&
+                       request.resource.data.sequenceNumber == resource.data.sequenceNumber &&
+                       request.resource.data.controlType == resource.data.controlType && // Control type should not change after creation
+                       request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
 
-    // Aturan permisif untuk development (hapus atau ganti sebelum produksi)
-     match /{document=**} {
-       allow read, write: if request.time < timestamp.date(2025, 7, 30);
-     }
+    // MonitoringSessions collection
+    match /monitoringSessions/{sessionId} {
+      allow read, list: if request.auth != null; // Further filtering by userId and period in client query
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.period != null && request.resource.data.period is string &&
+                       request.resource.data.name != null && request.resource.data.name is string &&
+                       request.resource.data.startDate != null && request.resource.data.startDate is string &&
+                       request.resource.data.endDate != null && request.resource.data.endDate is string &&
+                       request.resource.data.riskCauseIdsToMonitor is list &&
+                       request.resource.data.status is string && (request.resource.data.status == 'Direncanakan'); // Initial status
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid &&
+                       // Allow status updates, and perhaps name/dates if session is 'Direncanakan'
+                       // For simplicity, allow update of status only if it's by owner
+                       (request.resource.data.status != resource.data.status || 
+                        (resource.data.status == 'Direncanakan' && 
+                         (request.resource.data.name != resource.data.name ||
+                          request.resource.data.startDate != resource.data.startDate ||
+                          request.resource.data.endDate != resource.data.endDate ||
+                          request.resource.data.riskCauseIdsToMonitor != resource.data.riskCauseIdsToMonitor))) &&
+                       // Immutable fields
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.period == resource.data.period &&
+                       request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // RiskExposures collection
+    match /riskExposures/{exposureId} { // exposureId will be monitoringSessionId_riskCauseId
+      allow read, list: if request.auth != null;
+      allow create, update: if request.auth != null &&
+                               request.resource.data.userId == request.auth.uid &&
+                               request.resource.data.period != null && request.resource.data.period is string &&
+                               request.resource.data.monitoringSessionId != null && request.resource.data.monitoringSessionId is string &&
+                               request.resource.data.riskCauseId != null && request.resource.data.riskCauseId is string &&
+                               exists(/databases/$(database)/documents/monitoringSessions/$(request.resource.data.monitoringSessionId)) &&
+                               get(/databases/$(database)/documents/monitoringSessions/$(request.resource.data.monitoringSessionId)).data.userId == request.auth.uid &&
+                               get(/databases/$(database)/documents/monitoringSessions/$(request.resource.data.monitoringSessionId)).data.period == request.resource.data.period;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
   }
 }

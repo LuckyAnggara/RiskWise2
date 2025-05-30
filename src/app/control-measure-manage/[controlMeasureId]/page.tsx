@@ -27,7 +27,7 @@ import { getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance } from '@
 import { suggestControlMeasuresAction } from '@/app/actions';
 import { ControlMeasureAISuggestionsModal, type AISuggestedControlMeasure } from '@/components/risks/control-measure-ai-suggestions-modal';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-
+import {Badge} from '@/components/ui/badge'
 import { getGoalById } from '@/services/goalService';
 import { getPotentialRiskById } from '@/services/potentialRiskService';
 import { getRiskCauseById } from '@/services/riskCauseService';

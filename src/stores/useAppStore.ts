@@ -1,0 +1,640 @@
+
+"use client";
+
+import { create } from 'zustand';
+import type { Goal, PotentialRisk, RiskCause, ControlMeasure, AppUser, MonitoringSession, RiskExposure, MonitoredControlMeasureData } from '@/lib/types';
+import { 
+  addGoal as addGoalToService, 
+  getGoals as getGoalsFromService, 
+  updateGoal as updateGoalInService, 
+  deleteGoal as deleteGoalFromService 
+} from '@/services/goalService';
+import {
+  addPotentialRisk as addPotentialRiskToService,
+  getPotentialRisksByGoalId as getPotentialRisksByGoalIdFromService,
+  updatePotentialRisk as updatePotentialRiskInService,
+  deletePotentialRiskAndSubCollections as deletePotentialRiskFromService,
+  getPotentialRiskById as getPotentialRiskByIdFromService,
+} from '@/services/potentialRiskService';
+import {
+  addRiskCause as addRiskCauseToService,
+  getRiskCausesByPotentialRiskId as getRiskCausesByPotentialRiskIdFromService,
+  updateRiskCause as updateRiskCauseInService,
+  deleteRiskCauseAndSubCollections as deleteRiskCauseFromService,
+  getRiskCauseById as getRiskCauseByIdFromService,
+} from '@/services/riskCauseService';
+import {
+  addControlMeasure as addControlMeasureToService,
+  getControlMeasuresByRiskCauseId as fetchControlMeasuresByRiskCauseIdFromService,
+  updateControlMeasure as updateControlMeasureInService,
+  deleteControlMeasure as deleteControlMeasureFromService,
+  getControlMeasureById as getControlMeasureByIdFromService,
+} from '@/services/controlMeasureService';
+import {
+  addMonitoringSession as addMonitoringSessionToService,
+  getMonitoringSessions as getMonitoringSessionsFromService,
+  updateMonitoringSessionStatus as updateMonitoringSessionStatusInService,
+  getMonitoringSessionById as getMonitoringSessionByIdFromService,
+} from '@/services/monitoringService';
+import {
+  upsertRiskExposure as upsertRiskExposureToService,
+  getRiskExposuresBySession as getRiskExposuresBySessionFromService,
+} from '@/services/riskExposureService';
+
+interface AppState {
+  // User context (simplified, AuthContext handles full user object)
+  currentUserId: string | null;
+  currentPeriod: string | null;
+  dataFetchedForPeriod: string | null; // Stores 'userId|period' string for which data was fetched
+
+  // Goals
+  goals: Goal[];
+  goalsLoading: boolean;
+  fetchGoals: (userId: string, period: string) => Promise<void>;
+  addGoalToStore: (goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'userId' | 'period'>, userId: string, period: string) => Promise<Goal | null>;
+  updateGoalInStore: (goalId: string, updatedData: Partial<Omit<Goal, 'id' | 'userId' | 'period' | 'code' | 'createdAt'>>) => Promise<Goal | null>;
+  deleteGoalFromStore: (goalId: string, userId: string, period: string) => Promise<void>;
+  getGoalById: (goalId: string, userId: string, period: string) => Promise<Goal | null>;
+
+
+  // Potential Risks
+  potentialRisks: PotentialRisk[];
+  potentialRisksLoading: boolean;
+  fetchPotentialRisks: (userId: string, period: string) => Promise<void>;
+  addPotentialRiskToStore: (data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'userId' | 'period' | 'sequenceNumber' | 'goalId'>, goalId: string, userId: string, period: string, sequenceNumber: number) => Promise<PotentialRisk | null>;
+  updatePotentialRiskInStore: (potentialRiskId: string, updatedData: Partial<Omit<PotentialRisk, 'id' | 'userId' | 'period' | 'goalId' | 'identifiedAt' | 'sequenceNumber'>>) => Promise<PotentialRisk | null>;
+  deletePotentialRiskFromStore: (potentialRiskId: string, userId: string, period: string) => Promise<void>;
+  getPotentialRiskById: (potentialRiskId: string, userId: string, period: string) => Promise<PotentialRisk | null>;
+
+  // Risk Causes
+  riskCauses: RiskCause[];
+  riskCausesLoading: boolean;
+  fetchRiskCauses: (userId: string, period: string) => Promise<void>;
+  addRiskCauseToStore: (data: Omit<RiskCause, 'id' | 'createdAt' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'sequenceNumber'>, potentialRiskId: string, goalId: string, userId: string, period: string, sequenceNumber: number) => Promise<RiskCause | null>;
+  updateRiskCauseInStore: (riskCauseId: string, updatedData: Partial<Omit<RiskCause, 'id' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber'>>) => Promise<RiskCause | null>;
+  deleteRiskCauseFromStore: (riskCauseId: string, userId: string, period: string) => Promise<void>;
+  getRiskCauseById: (riskCauseId: string, userId: string, period: string) => Promise<RiskCause | null>;
+
+  // Control Measures
+  controlMeasures: ControlMeasure[];
+  controlMeasuresLoading: boolean;
+  fetchControlMeasures: (userId: string, period: string, riskCauseId_optional?: string) => Promise<void>;
+  addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber'>, riskCauseId: string, potentialRiskId: string, goalId: string, userId: string, period: string) => Promise<ControlMeasure | null>;
+  updateControlMeasureInStore: (controlMeasureId: string, updatedData: Partial<Omit<ControlMeasure, 'id' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'updatedAt'>>) => Promise<ControlMeasure | null>;
+  deleteControlMeasureFromStore: (controlMeasureId: string) => Promise<void>;
+  getControlMeasureById: (controlMeasureId: string, userId: string, period: string) => Promise<ControlMeasure | null>;
+
+  // Monitoring Sessions
+  monitoringSessions: MonitoringSession[];
+  monitoringSessionsLoading: boolean;
+  fetchMonitoringSessions: (userId: string, period: string) => Promise<void>;
+  addMonitoringSessionToState: (sessionData: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'status'>, userId: string, period: string) => Promise<MonitoringSession | null>;
+  updateMonitoringSessionStatusInState: (sessionId: string, status: MonitoringSessionStatus) => Promise<MonitoringSession | null>;
+  getMonitoringSessionByIdFromState: (sessionId: string) => MonitoringSession | null; // Gets from state, for conduct page after creation
+
+  // Risk Exposures
+  riskExposures: RiskExposure[];
+  riskExposuresLoading: boolean;
+  fetchRiskExposuresForSession: (sessionId: string, userId: string, period: string) => Promise<void>;
+  upsertRiskExposureInState: (exposureData: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'>, userId: string, period: string) => Promise<RiskExposure | null>;
+
+
+  // Global actions
+  triggerInitialDataFetch: (userId: string, period: string) => Promise<void>;
+  resetAllData: () => void;
+}
+
+export const useAppStore = create<AppState>((set, get) => ({
+  currentUserId: null,
+  currentPeriod: null,
+  dataFetchedForPeriod: null,
+
+  goals: [],
+  goalsLoading: false,
+  potentialRisks: [],
+  potentialRisksLoading: false,
+  riskCauses: [],
+  riskCausesLoading: false,
+  controlMeasures: [],
+  controlMeasuresLoading: false,
+  monitoringSessions: [],
+  monitoringSessionsLoading: false,
+  riskExposures: [],
+  riskExposuresLoading: false,
+
+  triggerInitialDataFetch: async (userId, period) => {
+    const uniquePeriodIdentifier = `${userId}|${period}`;
+    if (get().dataFetchedForPeriod === uniquePeriodIdentifier && !get().goalsLoading) { // Avoid re-fetch if already fetched for this context or currently loading
+      console.log(`[AppStore] Data for ${uniquePeriodIdentifier} already fetched or being fetched. Skipping.`);
+      return;
+    }
+    console.log(`[AppStore] Triggering initial data fetch for ${uniquePeriodIdentifier}`);
+    set({ 
+      dataFetchedForPeriod: uniquePeriodIdentifier, 
+      goalsLoading: true, 
+      potentialRisksLoading: true, 
+      riskCausesLoading: true, 
+      controlMeasuresLoading: true,
+      monitoringSessionsLoading: true, // Also set monitoring loading
+      riskExposuresLoading: true, // And exposures loading
+    });
+    try {
+      await get().fetchGoals(userId, period);
+      // Subsequent fetches (potentialRisks, riskCauses, etc.) are chained within fetchGoals success
+    } catch (error) {
+      console.error("[AppStore] Error during triggerInitialDataFetch -> fetchGoals:", error);
+      set({ dataFetchedForPeriod: null }); // Reset if initial fetch fails
+    }
+  },
+
+  resetAllData: () => {
+    console.log("[AppStore] Resetting all data and loading states.");
+    set({
+      goals: [],
+      goalsLoading: false,
+      potentialRisks: [],
+      potentialRisksLoading: false,
+      riskCauses: [],
+      riskCausesLoading: false,
+      controlMeasures: [],
+      controlMeasuresLoading: false,
+      monitoringSessions: [],
+      monitoringSessionsLoading: false,
+      riskExposures: [],
+      riskExposuresLoading: false,
+      dataFetchedForPeriod: null,
+      currentUserId: null,
+      currentPeriod: null,
+    });
+  },
+
+  // --- Goals Actions ---
+  fetchGoals: async (userId, period) => {
+    console.log(`[AppStore] Fetching goals for User: ${userId}, Period: ${period}`);
+    set({ goalsLoading: true });
+    try {
+      const result = await getGoalsFromService(userId, period);
+      if (result.success && result.goals) {
+        const sortedGoals = result.goals.sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }));
+        set({ goals: sortedGoals, goalsLoading: false });
+        console.log(`[AppStore] Goals fetched successfully: ${sortedGoals.length} items. Triggering dependent fetches.`);
+        // Chain subsequent fetches
+        await get().fetchPotentialRisks(userId, period);
+        await get().fetchMonitoringSessions(userId, period); 
+      } else {
+        console.warn(`[AppStore] fetchGoals: Failed to fetch or no goals. Message: ${result.message}`);
+        set({ goals: [], goalsLoading: false, dataFetchedForPeriod: null }); // Reset if goals fail
+        // If goals fail, dependent fetches should also indicate loading false
+        set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false, riskExposuresLoading: false });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in fetchGoals:", errorMessage);
+      set({ goals: [], goalsLoading: false, dataFetchedForPeriod: null });
+      set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false, riskExposuresLoading: false });
+      throw new Error(`Gagal memuat daftar sasaran dari store: ${errorMessage}`);
+    }
+  },
+  addGoalToStore: async (goalData, userId, period) => {
+    console.log(`[AppStore] Adding goal for User: ${userId}, Period: ${period}`);
+    try {
+      const newGoalFromService = await addGoalToService(goalData, userId, period);
+      set(state => ({
+        goals: [...state.goals, newGoalFromService].sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }))
+      }));
+      return newGoalFromService;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in addGoalToStore:", errorMessage);
+      throw new Error(`Gagal menambahkan sasaran di store: ${errorMessage}`);
+    }
+  },
+  updateGoalInStore: async (goalId, updatedData) => {
+    console.log(`[AppStore] Updating goal ID: ${goalId}`);
+    try {
+      await updateGoalInService(goalId, updatedData);
+      // Optimistically update or re-fetch. For simplicity now, re-fetch specific item or list.
+      // A better approach would be to get the updated item from service or merge.
+      // For now, let's update locally and assume service has the same logic for updatedAt.
+      set(state => ({
+        goals: state.goals.map(g => 
+          g.id === goalId ? { ...g, ...updatedData, updatedAt: new Date().toISOString() } : g
+        ).sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }))
+      }));
+      const updatedGoal = get().goals.find(g => g.id === goalId);
+      return updatedGoal || null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in updateGoalInStore:", errorMessage);
+      throw new Error(`Gagal memperbarui sasaran di store: ${errorMessage}`);
+    }
+  },
+  deleteGoalFromStore: async (goalId, userId, period) => {
+    console.log(`[AppStore] Deleting goal ID: ${goalId}`);
+    try {
+      await deleteGoalFromService(goalId, userId, period); // Service handles cascading delete in Firestore
+      set(state => ({
+        goals: state.goals.filter(g => g.id !== goalId),
+        potentialRisks: state.potentialRisks.filter(pr => pr.goalId !== goalId),
+        riskCauses: state.riskCauses.filter(rc => rc.goalId !== goalId),
+        controlMeasures: state.controlMeasures.filter(cm => cm.goalId !== goalId),
+      }));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in deleteGoalFromStore:", errorMessage);
+      throw new Error(`Gagal menghapus sasaran dari store: ${errorMessage}`);
+    }
+  },
+   getGoalById: async (goalId, userId, period) => {
+    const existingGoal = get().goals.find(g => g.id === goalId && g.userId === userId && g.period === period);
+    if (existingGoal) return existingGoal;
+    try {
+      const goalFromService = await getGoalsFromService(userId, period).then(res => res.goals?.find(g => g.id === goalId));
+      return goalFromService || null;
+    } catch (error) {
+      console.error(`[AppStore] Error in getGoalById from service for ${goalId}:`, error);
+      return null;
+    }
+  },
+
+  // --- Potential Risks Actions ---
+  fetchPotentialRisks: async (userId, period) => {
+    console.log(`[AppStore] Fetching potential risks for User: ${userId}, Period: ${period}`);
+    set({ potentialRisksLoading: true });
+    try {
+      const currentGoals = get().goals; // Assume goals are already fetched for this context
+      if (currentGoals.length === 0) {
+        console.log("[AppStore] No goals found, skipping potential risk fetch.");
+        set({ potentialRisks: [], potentialRisksLoading: false });
+        await get().fetchRiskCauses(userId, period); // Still proceed to fetch causes (might be empty)
+        return;
+      }
+      
+      let allPRs: PotentialRisk[] = [];
+      for (const goal of currentGoals) {
+        const prs = await getPotentialRisksByGoalIdFromService(goal.id, userId, period);
+        allPRs.push(...prs);
+      }
+      const sortedPRs = allPRs.sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
+      set({ potentialRisks: sortedPRs, potentialRisksLoading: false });
+      console.log(`[AppStore] PotentialRisks fetched: ${sortedPRs.length}. Triggering cause fetch.`);
+      await get().fetchRiskCauses(userId, period);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in fetchPotentialRisks:", errorMessage);
+      set({ potentialRisks: [], potentialRisksLoading: false, dataFetchedForPeriod: null });
+      set({ riskCausesLoading: false, controlMeasuresLoading: false }); // Cascade loading flags
+      throw new Error(`Gagal memuat potensi risiko dari store: ${errorMessage}`);
+    }
+  },
+  addPotentialRiskToStore: async (data, goalId, userId, period, sequenceNumber) => {
+    console.log(`[AppStore] Adding potential risk to Goal: ${goalId}`);
+    try {
+      const newPR = await addPotentialRiskToService(data, goalId, userId, period, sequenceNumber);
+      set(state => ({
+        potentialRisks: [...state.potentialRisks, newPR].sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`))
+      }));
+      return newPR;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in addPotentialRiskToStore:", errorMessage);
+      throw new Error(`Gagal menambahkan potensi risiko di store: ${errorMessage}`);
+    }
+  },
+  updatePotentialRiskInStore: async (potentialRiskId, updatedData) => {
+    console.log(`[AppStore] Updating potential risk ID: ${potentialRiskId}`);
+    try {
+      const updatedPR = await updatePotentialRiskInService(potentialRiskId, updatedData);
+      if (updatedPR) {
+        set(state => ({
+          potentialRisks: state.potentialRisks.map(pr => 
+            pr.id === potentialRiskId ? updatedPR : pr
+          ).sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`))
+        }));
+        return updatedPR;
+      }
+      return null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in updatePotentialRiskInStore:", errorMessage);
+      throw new Error(`Gagal memperbarui potensi risiko di store: ${errorMessage}`);
+    }
+  },
+  deletePotentialRiskFromStore: async (potentialRiskId, userId, period) => {
+    console.log(`[AppStore] Deleting potential risk ID: ${potentialRiskId}`);
+    try {
+      await deletePotentialRiskFromService(potentialRiskId, userId, period);
+      set(state => ({
+        potentialRisks: state.potentialRisks.filter(pr => pr.id !== potentialRiskId),
+        riskCauses: state.riskCauses.filter(rc => rc.potentialRiskId !== potentialRiskId), // Also clear child causes
+        controlMeasures: state.controlMeasures.filter(cm => cm.potentialRiskId !== potentialRiskId), // And grandchild controls
+      }));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in deletePotentialRiskFromStore:", errorMessage);
+      throw new Error(`Gagal menghapus potensi risiko dari store: ${errorMessage}`);
+    }
+  },
+  getPotentialRiskById: async (potentialRiskId, userId, period) => {
+    const existingPR = get().potentialRisks.find(pr => pr.id === potentialRiskId && pr.userId === userId && pr.period === period);
+    if (existingPR) return existingPR;
+    try {
+      return await getPotentialRiskByIdFromService(potentialRiskId, userId, period);
+    } catch (error) {
+      console.error(`[AppStore] Error in getPotentialRiskById from service for ${potentialRiskId}:`, error);
+      return null;
+    }
+  },
+
+  // --- Risk Causes Actions ---
+  fetchRiskCauses: async (userId, period) => {
+    console.log(`[AppStore] Fetching risk causes for User: ${userId}, Period: ${period}`);
+    set({ riskCausesLoading: true });
+    try {
+      const currentPRs = get().potentialRisks;
+      if (currentPRs.length === 0) {
+        console.log("[AppStore] No potential risks found, skipping risk cause fetch.");
+        set({ riskCauses: [], riskCausesLoading: false });
+        await get().fetchControlMeasures(userId, period); // Still proceed to fetch controls (might be empty)
+        return;
+      }
+      let allRCs: RiskCause[] = [];
+      for (const pr of currentPRs) {
+        const rcs = await getRiskCausesByPotentialRiskIdFromService(pr.id, userId, period);
+        allRCs.push(...rcs);
+      }
+      const sortedRCs = allRCs.sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
+      set({ riskCauses: sortedRCs, riskCausesLoading: false });
+      console.log(`[AppStore] RiskCauses fetched: ${sortedRCs.length}. Triggering control measure fetch.`);
+      await get().fetchControlMeasures(userId, period);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in fetchRiskCauses:", errorMessage);
+      set({ riskCauses: [], riskCausesLoading: false, dataFetchedForPeriod: null });
+      set({ controlMeasuresLoading: false }); // Cascade loading flags
+      throw new Error(`Gagal memuat penyebab risiko dari store: ${errorMessage}`);
+    }
+  },
+  addRiskCauseToStore: async (data, potentialRiskId, goalId, userId, period, sequenceNumber) => {
+     console.log(`[AppStore] Adding risk cause to PotentialRisk: ${potentialRiskId}`);
+    try {
+      const newRC = await addRiskCauseToService(data, potentialRiskId, goalId, userId, period, sequenceNumber);
+      set(state => ({
+        riskCauses: [...state.riskCauses, newRC].sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`))
+      }));
+      return newRC;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in addRiskCauseToStore:", errorMessage);
+      throw new Error(`Gagal menambahkan penyebab risiko di store: ${errorMessage}`);
+    }
+  },
+  updateRiskCauseInStore: async (riskCauseId, updatedData) => {
+    console.log(`[AppStore] Updating risk cause ID: ${riskCauseId}`);
+    try {
+      const updatedRC = await updateRiskCauseInService(riskCauseId, updatedData);
+      if(updatedRC) {
+        set(state => ({
+          riskCauses: state.riskCauses.map(rc => 
+            rc.id === riskCauseId ? updatedRC : rc
+          ).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`))
+        }));
+        return updatedRC;
+      }
+      return null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in updateRiskCauseInStore:", errorMessage);
+      throw new Error(`Gagal memperbarui penyebab risiko di store: ${errorMessage}`);
+    }
+  },
+  deleteRiskCauseFromStore: async (riskCauseId, userId, period) => {
+    console.log(`[AppStore] Deleting risk cause ID: ${riskCauseId}`);
+    try {
+      await deleteRiskCauseFromService(riskCauseId, userId, period); // Service handles sub-collection delete
+      set(state => ({
+        riskCauses: state.riskCauses.filter(rc => rc.id !== riskCauseId),
+        controlMeasures: state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId), // Also clear child controls
+      }));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in deleteRiskCauseFromStore:", errorMessage);
+      throw new Error(`Gagal menghapus penyebab risiko dari store: ${errorMessage}`);
+    }
+  },
+  getRiskCauseById: async (riskCauseId, userId, period) => {
+    const existingRC = get().riskCauses.find(rc => rc.id === riskCauseId && rc.userId === userId && rc.period === period);
+    if (existingRC) return existingRC;
+    try {
+      return await getRiskCauseByIdFromService(riskCauseId, userId, period);
+    } catch (error) {
+      console.error(`[AppStore] Error in getRiskCauseById from service for ${riskCauseId}:`, error);
+      return null;
+    }
+  },
+
+  // --- Control Measures Actions ---
+  fetchControlMeasures: async (userId, period, riskCauseId_optional?: string) => {
+    console.log(`[AppStore] Fetching control measures. User: ${userId}, Period: ${period}, RC_ID (opt): ${riskCauseId_optional}`);
+    set({ controlMeasuresLoading: true });
+    try {
+      let allCMs: ControlMeasure[] = [];
+      if (riskCauseId_optional) {
+        // Fetch for a specific risk cause (e.g., for RiskCauseAnalysisPage)
+        allCMs = await fetchControlMeasuresByRiskCauseIdFromService(riskCauseId_optional, userId, period);
+        set(state => ({
+          controlMeasures: [ // Replace/update only for this specific riskCauseId
+            ...state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional),
+            ...allCMs
+          ].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`)),
+          controlMeasuresLoading: false,
+        }));
+      } else {
+        // Fetch all control measures for all loaded risk causes (e.g., initial load)
+        const currentRCs = get().riskCauses;
+        if (currentRCs.length === 0) {
+          console.log("[AppStore] No risk causes found, skipping control measure fetch.");
+          set({ controlMeasures: [], controlMeasuresLoading: false });
+          return;
+        }
+        for (const rc of currentRCs) {
+          const cms = await fetchControlMeasuresByRiskCauseIdFromService(rc.id, userId, period);
+          allCMs.push(...cms);
+        }
+        const sortedCMs = allCMs.sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`));
+        set({ controlMeasures: sortedCMs, controlMeasuresLoading: false });
+      }
+      console.log(`[AppStore] ControlMeasures fetched: ${allCMs.length}.`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in fetchControlMeasures:", errorMessage);
+      set({ controlMeasures: [], controlMeasuresLoading: false, dataFetchedForPeriod: null });
+      throw new Error(`Gagal memuat tindakan pengendalian dari store: ${errorMessage}`);
+    }
+  },
+  addControlMeasureToStore: async (data, riskCauseId, potentialRiskId, goalId, userId, period) => {
+    console.log(`[AppStore] Adding control measure to RiskCause: ${riskCauseId}`);
+    try {
+      const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, userId, period, data.controlType);
+      set(state => ({
+        controlMeasures: [...state.controlMeasures, newCM].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
+      }));
+      return newCM;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in addControlMeasureToStore:", errorMessage);
+      throw new Error(`Gagal menambahkan tindakan pengendalian di store: ${errorMessage}`);
+    }
+  },
+  updateControlMeasureInStore: async (controlMeasureId, updatedData) => {
+     console.log(`[AppStore] Updating control measure ID: ${controlMeasureId}`);
+    try {
+      const updatedCM = await updateControlMeasureInService(controlMeasureId, updatedData);
+      if (updatedCM) {
+        set(state => ({
+          controlMeasures: state.controlMeasures.map(cm => 
+            cm.id === controlMeasureId ? updatedCM : cm
+          ).sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
+        }));
+        return updatedCM;
+      }
+      return null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in updateControlMeasureInStore:", errorMessage);
+      throw new Error(`Gagal memperbarui tindakan pengendalian di store: ${errorMessage}`);
+    }
+  },
+  deleteControlMeasureFromStore: async (controlMeasureId) => {
+    console.log(`[AppStore] Deleting control measure ID: ${controlMeasureId}`);
+    try {
+      await deleteControlMeasureFromService(controlMeasureId);
+      set(state => ({
+        controlMeasures: state.controlMeasures.filter(cm => cm.id !== controlMeasureId)
+      }));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in deleteControlMeasureFromStore:", errorMessage);
+      throw new Error(`Gagal menghapus tindakan pengendalian dari store: ${errorMessage}`);
+    }
+  },
+  getControlMeasureById: async (controlMeasureId, userId, period) => {
+    const existingCM = get().controlMeasures.find(cm => cm.id === controlMeasureId && cm.userId === userId && cm.period === period);
+    if (existingCM) return existingCM;
+    try {
+      return await getControlMeasureByIdFromService(controlMeasureId, userId, period);
+    } catch (error) {
+      console.error(`[AppStore] Error in getControlMeasureById from service for ${controlMeasureId}:`, error);
+      return null;
+    }
+  },
+
+  // --- Monitoring Sessions Actions ---
+  fetchMonitoringSessions: async (userId, period) => {
+    console.log(`[AppStore] Fetching monitoring sessions for User: ${userId}, Period: ${period}`);
+    set({ monitoringSessionsLoading: true });
+    try {
+      const sessions = await getMonitoringSessionsFromService(userId, period);
+      set({ monitoringSessions: sessions, monitoringSessionsLoading: false });
+      console.log(`[AppStore] Monitoring sessions fetched: ${sessions.length}. Triggering exposure fetch if needed.`);
+      // Optionally, trigger fetch for exposures of the active session if one exists and is active
+      // For now, exposures are fetched on the conduct page.
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in fetchMonitoringSessions:", errorMessage);
+      set({ monitoringSessions: [], monitoringSessionsLoading: false, dataFetchedForPeriod: null });
+      throw new Error(`Gagal memuat sesi pemantauan dari store: ${errorMessage}`);
+    }
+  },
+  addMonitoringSessionToState: async (sessionData, userId, period) => {
+    console.log(`[AppStore] Adding monitoring session for User: ${userId}, Period: ${period}`);
+    try {
+      const newSession = await addMonitoringSessionToService(sessionData, userId, period);
+      set(state => ({
+        monitoringSessions: [...state.monitoringSessions, newSession].sort((a,b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
+      }));
+      return newSession;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in addMonitoringSessionToState:", errorMessage);
+      throw new Error(`Gagal menambahkan sesi pemantauan di store: ${errorMessage}`);
+    }
+  },
+  updateMonitoringSessionStatusInState: async (sessionId, status) => {
+    console.log(`[AppStore] Updating status for monitoring session ID: ${sessionId} to ${status}`);
+    try {
+      await updateMonitoringSessionStatusInService(sessionId, status);
+      const updatedSession = await getMonitoringSessionByIdFromService(sessionId, get().currentUserId!, get().currentPeriod!);
+      if(updatedSession){
+        set(state => ({
+          monitoringSessions: state.monitoringSessions.map(s => s.id === sessionId ? updatedSession : s)
+        }));
+        return updatedSession;
+      }
+      return null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[AppStore] Error in updateMonitoringSessionStatusInState:", errorMessage);
+      throw new Error(`Gagal memperbarui status sesi pemantauan di store: ${errorMessage}`);
+    }
+  },
+  getMonitoringSessionByIdFromState: (sessionId) => {
+    return get().monitoringSessions.find(s => s.id === sessionId) || null;
+  },
+
+  // --- Risk Exposures Actions ---
+  fetchRiskExposuresForSession: async (sessionId, userId, period) => {
+    console.log(`[AppStore] Fetching risk exposures for Session: ${sessionId}, User: ${userId}, Period: ${period}`);
+    set({ riskExposuresLoading: true });
+    try {
+      const exposures = await getRiskExposuresBySessionFromService(sessionId, userId, period);
+      // Update only exposures for the current session, keep others
+      set(state => ({
+        riskExposures: [
+          ...state.riskExposures.filter(re => re.monitoringSessionId !== sessionId),
+          ...exposures
+        ],
+        riskExposuresLoading: false,
+      }));
+      console.log(`[AppStore] Risk exposures fetched for session ${sessionId}: ${exposures.length}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[AppStore] Error in fetchRiskExposuresForSession (Session: ${sessionId}):`, errorMessage);
+      set({ riskExposuresLoading: false }); // Don't clear all exposures on error for one session
+      throw new Error(`Gagal memuat data paparan risiko dari store: ${errorMessage}`);
+    }
+  },
+  upsertRiskExposureInState: async (exposureData, userId, period) => {
+     console.log(`[AppStore] Upserting risk exposure for RiskCause: ${exposureData.riskCauseId} in Session: ${exposureData.monitoringSessionId}`);
+    try {
+      const upsertedExposureFromService = await upsertRiskExposureToService(exposureData, userId, period);
+      set(state => {
+        const index = state.riskExposures.findIndex(
+          re => re.monitoringSessionId === upsertedExposureFromService.monitoringSessionId && re.riskCauseId === upsertedExposureFromService.riskCauseId
+        );
+        if (index !== -1) {
+          const updatedExposures = [...state.riskExposures];
+          updatedExposures[index] = upsertedExposureFromService;
+          return { riskExposures: updatedExposures };
+        }
+        return { riskExposures: [...state.riskExposures, upsertedExposureFromService] };
+      });
+      return upsertedExposureFromService;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[AppStore] upsertRiskExposureInState (CauseID: ${exposureData.riskCauseId}): Failed:`, errorMessage);
+      throw new Error(`Gagal menyimpan paparan risiko di store: ${errorMessage}`);
+    }
+  },
+
+}));
+
+// Function to call on user context change (e.g., login, period change)
+export const triggerGlobalDataFetch = (userId: string | null, period: string | null) => {
+  const store = useAppStore.getState();
+  if (userId && period) {
+    store.triggerInitialDataFetch(userId, period);
+  } else {
+    store.resetAllData();
+  }
+};
