@@ -11,13 +11,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import type { PotentialRisk, Goal, RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, RiskCategory, ControlMeasure, ControlMeasureTypeKey, AppUser } from '@/lib/types';
-import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, CalculatedRiskLevelCategory, CONTROL_MEASURE_TYPE_KEYS, getControlTypeName } from '@/lib/types';
+import type { PotentialRisk, Goal, RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, ControlMeasure, ControlMeasureTypeKey, AppUser } from '@/lib/types';
+import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, CalculatedRiskLevelCategory } from '@/lib/types';
 import { useForm, type SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { ArrowLeft, Loader2, Save, Info, BarChartHorizontalBig, Wand2, PlusCircle, Trash2, Edit, Settings2 } from 'lucide-react';
-import { useToast } from "@/hooks/use-toast";
+import { ArrowLeft, Loader2, Save, Info, BarChartHorizontalBig, Wand2, PlusCircle, Trash2, Edit, Settings2, BarChart3 } from 'lucide-react';
+import { useToast } from "@/hooks/useToast";
 import { LikelihoodCriteriaModal } from '@/components/risks/likelihood-criteria-modal';
 import { ImpactCriteriaModal } from '@/components/risks/impact-criteria-modal';
 import { RiskMatrixModal } from '@/components/risks/risk-matrix-modal';
@@ -31,26 +31,37 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format, parseISO, isValid as isValidDate } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
-import { useAppStore } from '@/stores/useAppStore';
+import { getGoalById as getGoalByIdFromService } from '@/services/goalService';
+import { getPotentialRiskById as getPotentialRiskByIdFromService } from '@/services/potentialRiskService';
+import { getRiskCauseById as getRiskCauseByIdFromService, updateRiskCause as updateRiskCauseInService } from '@/services/riskCauseService';
+import { 
+  addControlMeasure as addControlMeasureToService, 
+  getControlMeasuresByRiskCauseId as fetchControlMeasuresByRiskCauseIdFromService, 
+  deleteControlMeasure as deleteControlMeasureFromService, 
+  updateControlMeasure as updateControlMeasureInService,
+  getControlMeasureById as getControlMeasureByIdFromService
+} from '@/services/controlMeasureService';
 import { shallow } from 'zustand/shallow';
 
-import { getGoalById } from '@/services/goalService';
-import { getPotentialRiskById } from '@/services/potentialRiskService';
-import { getRiskCauseById as getRiskCauseByIdFromService, updateRiskCause as updateRiskCauseInService } from '@/services/riskCauseService';
-import { addControlMeasure, getControlMeasuresByRiskCauseId, deleteControlMeasure, updateControlMeasure as updateControlMeasureInService } from '@/services/controlMeasureService';
-
-
 export const RISK_SCORE_HEATMAP: { [key: number]: { [key: number]: number } } = {
-  // Dampak ->
-  // Kemungkinan
-  // V               1 (TS) 2 (M)  3 (Mod) 4 (S)   5 (SS)
-  /* 5 Sangat Pasti*/  1: { 1: 9,  2: 15,  3: 18,  4: 23,  5: 25  }, // Baris untuk Kemungkinan 5 (Sangat Pasti)
-  /* 4 Sering */       2: { 1: 6,  2: 12,  3: 16,  4: 19,  5: 24  }, // Baris untuk Kemungkinan 4 (Sering)
-  /* 3 Kadang */       3: { 1: 4,  2: 10,  3: 14,  4: 17,  5: 22  }, // Baris untuk Kemungkinan 3 (Kadang)
-  /* 2 Jarang */       4: { 1: 2,  2: 7,   3: 11,  4: 13,  5: 21  }, // Baris untuk Kemungkinan 2 (Jarang)
-  /* 1 Hampir Tidak */ 5: { 1: 1,  2: 3,   3: 5,   4: 8,   5: 20  }  // Baris untuk Kemungkinan 1 (Hampir Tidak)
+  // Kemungkinan (Baris, 5 paling atas, 1 paling bawah) vs Dampak (Kolom, 1 paling kiri, 5 paling kanan)
+  // Di sini, kunci objek luar adalah nilai Kemungkinan (5 -> Hampir Pasti, 1 -> Hampir Tidak Terjadi)
+  // Kunci objek dalam adalah nilai Dampak (1 -> Tidak Signifikan, 5 -> Sangat Signifikan)
+  // Berdasarkan gambar:
+  // Kemungkinan (Baris): 5 (atas) ke 1 (bawah)
+  // Dampak (Kolom): 1 (kiri) ke 5 (kanan)
+  
+  // Baris untuk Kemungkinan 5 (Hampir pasti terjadi)
+  5: { 1: 9,  2: 15, 3: 18, 4: 23, 5: 25  }, 
+  // Baris untuk Kemungkinan 4 (Sering terjadi)
+  4: { 1: 6,  2: 12, 3: 16, 4: 19, 5: 24  }, 
+  // Baris untuk Kemungkinan 3 (Kadang Terjadi)
+  3: { 1: 4,  2: 10, 3: 14, 4: 17, 5: 22  }, 
+  // Baris untuk Kemungkinan 2 (Jarang terjadi)
+  2: { 1: 2,  2: 7,  3: 11, 4: 13, 5: 21  }, 
+  // Baris untuk Kemungkinan 1 (Hampir tidak terjadi)
+  1: { 1: 1,  2: 3,  3: 5,  4: 8,  5: 20  }   
 };
-
 
 export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, impact: ImpactLevelDesc | null): { level: CalculatedRiskLevelCategory | 'N/A'; score: number | null } => {
   if (!likelihood || !impact) return { level: 'N/A', score: null };
@@ -63,16 +74,10 @@ export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, i
     return { level: 'N/A', score: null };
   }
   
-  // Ambil skor dari heatmap yang sudah disesuaikan urutan barisnya
-  // Baris heatmap (kunci luar) adalah 1-5 yang merepresentasikan Kemungkinan 5-1
-  // Kolom heatmap (kunci dalam) adalah 1-5 yang merepresentasikan Dampak 1-5
-  // Karena LIKELIHOOD_LEVELS_DESC_MAP kita (1=Hampir tidak, 5=Sangat Pasti),
-  // kita perlu membalik mapping likelihoodValue untuk heatmap: heatmapRow = 6 - likelihoodValue
-  const heatmapRowKey = (6 - likelihoodValue) as keyof typeof RISK_SCORE_HEATMAP;
-  const score = RISK_SCORE_HEATMAP[heatmapRowKey]?.[impactValue] ?? null;
+  const score = RISK_SCORE_HEATMAP[likelihoodValue]?.[impactValue] ?? null;
 
   if (score === null) {
-    console.warn(`[getCalculatedRiskLevel] Score not found in heatmap for Likelihood: ${likelihood} (val: ${likelihoodValue}, mapRow: ${heatmapRowKey}), Impact: ${impact} (val: ${impactValue})`);
+    console.warn(`[getCalculatedRiskLevel] Score not found in heatmap for Likelihood: ${likelihood} (val: ${likelihoodValue}), Impact: ${impact} (val: ${impactValue})`);
     return { level: 'N/A', score }; 
   }
 
@@ -115,7 +120,6 @@ export const getControlGuidance = (riskLevel: CalculatedRiskLevelCategory | 'N/A
   }
 };
 
-
 const riskCauseAnalysisSchema = z.object({
   keyRiskIndicator: z.string().nullable().optional(),
   riskTolerance: z.string().nullable().optional(),
@@ -133,26 +137,23 @@ export default function RiskCauseAnalysisPage() {
   
   const { currentUser, appUser, loading: authLoading, profileLoading, isProfileComplete } = useAuth();
   
-  // Select states from Zustand store with shallow equality for object selection
-  const allControlMeasures = useAppStore(state => state.controlMeasures);
-  const controlMeasuresLoading = useAppStore(state => state.controlMeasuresLoading);
-  const store = useAppStore();
-
-
   const [localDataLoading, setLocalDataLoading] = useState(true); 
-  const pageIsLoading = authLoading || profileLoading || localDataLoading || controlMeasuresLoading;
   
+  const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
+  const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
+  const riskAppetiteFromUser = useMemo(() => appUser?.riskAppetite ?? 5, [appUser]); 
+  const uprDisplayName = useMemo(() => appUser?.displayName || "UPR Pengguna", [appUser]);
+
   const [currentRiskCause, setCurrentRiskCause] = useState<RiskCause | null>(null);
   const [parentPotentialRisk, setParentPotentialRisk] = useState<PotentialRisk | null>(null);
   const [grandParentGoal, setGrandParentGoal] = useState<Goal | null>(null);
-  
+  const [controls, setControls] =useState<ControlMeasure[]>([]); // Local state for controls
+  const [controlsPageLoading, setControlsPageLoading] = useState(false); // Local loading for controls
+
   const [isSaving, setIsSaving] = useState(false);
   
-  const [isControlModalOpen, setIsControlModalOpen] = useState(false);
-  const [controlToEdit, setControlToEdit] = useState<ControlMeasure | null>(null);
   const [isDeleteControlAlertOpen, setIsDeleteControlAlertOpen] = useState(false);
   const [controlToDelete, setControlToDelete] = useState<ControlMeasure | null>(null);
-
 
   const [isLikelihoodCriteriaModalOpen, setIsLikelihoodCriteriaModalOpen] = useState(false);
   const [isImpactCriteriaModalOpen, setIsImpactCriteriaModalOpen] = useState(false);
@@ -177,21 +178,16 @@ export default function RiskCauseAnalysisPage() {
 
   const { toast } = useToast();
 
-  const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
-  const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
-  const riskAppetiteFromUser = useMemo(() => appUser?.riskAppetite ?? 5, [appUser]); 
-  const uprDisplayName = useMemo(() => appUser?.displayName || "UPR Pengguna", [appUser]);
-
   const riskCauseIdQuery = searchParams.get('riskCauseId'); 
   const returnPathForButton = useMemo(() => {
     const fromQuery = searchParams.get('from');
     if (fromQuery) return fromQuery;
+    // Fallback logic if parentPotentialRisk is not loaded yet but its ID might be in riskCause
     if (parentPotentialRisk?.id) return `/all-risks/manage/${parentPotentialRisk.id}`;
-    // Fallback jika riskCauseIdQuery ada (meskipun parentPotentialRisk mungkin belum termuat saat ini dihitung)
-    // Ini mungkin perlu disesuaikan jika kita ingin path kembali yang lebih dinamis berdasarkan konteks yang dimuat
-    // Untuk saat ini, jika parentPotentialRisk tidak ada, fallback ke /risk-analysis
-    return '/risk-analysis'; 
-  }, [searchParams, parentPotentialRisk?.id]);
+    if (currentRiskCause?.potentialRiskId) return `/all-risks/manage/${currentRiskCause.potentialRiskId}`;
+    return '/risk-analysis';
+  }, [searchParams, parentPotentialRisk?.id, currentRiskCause?.potentialRiskId]);
+
 
   const {
     register,
@@ -217,25 +213,11 @@ export default function RiskCauseAnalysisPage() {
   
   const { level: calculatedRiskLevelText, score: calculatedRiskScore } = getCalculatedRiskLevel(watchedLikelihood, watchedImpact);
   
-  const filteredControlMeasures = useMemo(() => {
-    if (!allControlMeasures || !riskCauseId || !currentUserId || !currentPeriod) return [];
-    return allControlMeasures.filter(cm => 
-      cm.riskCauseId === riskCauseId && 
-      cm.userId === currentUserId && 
-      cm.period === currentPeriod
-    ).sort((a, b) => {
-      const typeOrder = CONTROL_MEASURE_TYPE_KEYS.indexOf(a.controlType) - CONTROL_MEASURE_TYPE_KEYS.indexOf(b.controlType);
-      if (typeOrder !== 0) return typeOrder;
-      return (a.sequenceNumber || 0) - (b.sequenceNumber || 0);
-    });
-  }, [allControlMeasures, riskCauseId, currentUserId, currentPeriod]);
-
   useEffect(() => {
     let isActive = true;
-    console.log(`[RiskCauseAnalysisPage] Effect for main data fetch TRIGGERED. RC_ID: ${riskCauseId}, UserID: ${currentUserId}, Period: ${currentPeriod}, AuthL: ${authLoading}, ProfL: ${profileLoading}, ProfComp: ${isProfileComplete}`);
-
     async function loadPageData() {
-      if (!riskCauseId || !currentUserId || !currentPeriod || !isProfileComplete || authLoading || profileLoading) {
+      console.log(`[RiskCauseAnalysisPage] Effect for main data fetch TRIGGERED. RC_ID: ${riskCauseId}, UserID: ${currentUserId}, Period: ${currentPeriod}, AuthL: ${authLoading}, ProfL: ${profileLoading}, ProfComp: ${isProfileComplete}`);
+      if (!currentUserId || !currentPeriod || !riskCauseId || !isProfileComplete || authLoading || profileLoading) {
         console.log("[RiskCauseAnalysisPage] loadPageData: Prerequisites not met. Aborting fetch.");
         if (!authLoading && !profileLoading && isActive) {
           setLocalDataLoading(false);
@@ -247,70 +229,90 @@ export default function RiskCauseAnalysisPage() {
       setLocalDataLoading(true);
       console.log(`[RiskCauseAnalysisPage] loadPageData: Fetching data for RC_ID: ${riskCauseId}, User: ${currentUserId}, Period: ${currentPeriod}`);
 
-      // Reset state sebelum fetch baru
       setCurrentRiskCause(null);
       setParentPotentialRisk(null);
       setGrandParentGoal(null);
-      // store.getState().setControlMeasures([]); // Tidak perlu, fetchControlMeasures akan menangani
+      setControls([]);
       setAiLikelihoodImpactSuggestion(null);
       setAiKriToleranceSuggestions(null);
       reset({ keyRiskIndicator: null, riskTolerance: null, likelihood: null, impact: null });
       
       try {
-        console.log(`[RiskCauseAnalysisPage] Attempting to get RiskCause ID: ${riskCauseId}`);
+        console.log(`[RiskCauseAnalysisPage] Attempting to get RiskCause ID: ${riskCauseId} for user ${currentUserId}, period ${currentPeriod}`);
         const foundCause = await getRiskCauseByIdFromService(riskCauseId, currentUserId, currentPeriod);
         if (!isActive) return;
         if (!foundCause) {
-          console.error(`[RiskCauseAnalysisPage] RiskCause with ID ${riskCauseId} not found or context mismatch for user ${currentUserId}, period ${currentPeriod}.`);
-          throw new Error(`Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan atau tidak cocok konteks.`);
+          console.error(`[RiskCauseAnalysisPage] RiskCause with ID ${riskCauseId} not found or context mismatch.`);
+          throw new Error(`Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan atau tidak cocok konteks pengguna/periode.`);
         }
-        console.log(`[RiskCauseAnalysisPage] Fetched RiskCause:`, foundCause);
+        console.log(`[RiskCauseAnalysisPage] Fetched RiskCause:`, JSON.stringify(foundCause).substring(0, 200));
         if (isActive) setCurrentRiskCause(foundCause);
 
-        console.log(`[RiskCauseAnalysisPage] Attempting to get PotentialRisk ID: ${foundCause.potentialRiskId}`);
-        const foundPotentialRisk = await getPotentialRiskById(foundCause.potentialRiskId, currentUserId, currentPeriod);
+        console.log(`[RiskCauseAnalysisPage] Attempting to get PotentialRisk ID: ${foundCause.potentialRiskId} for user ${currentUserId}, period ${currentPeriod}`);
+        const foundPotentialRisk = await getPotentialRiskByIdFromService(foundCause.potentialRiskId, currentUserId, currentPeriod);
         if (!isActive) return;
         if (!foundPotentialRisk) {
             console.error(`[RiskCauseAnalysisPage] PotentialRisk with ID ${foundCause.potentialRiskId} not found or context mismatch.`);
-            throw new Error(`Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan atau tidak cocok konteks.`);
+            throw new Error(`Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan atau tidak cocok konteks pengguna/periode.`);
         }
-        console.log(`[RiskCauseAnalysisPage] Fetched PotentialRisk:`, foundPotentialRisk);
+        console.log(`[RiskCauseAnalysisPage] Fetched PotentialRisk:`, JSON.stringify(foundPotentialRisk).substring(0, 200));
         if (isActive) setParentPotentialRisk(foundPotentialRisk);
 
-        console.log(`[RiskCauseAnalysisPage] Attempting to get Goal ID: ${foundPotentialRisk.goalId}`);
-        const foundGoal = await getGoalById(foundPotentialRisk.goalId, currentUserId, currentPeriod);
+        console.log(`[RiskCauseAnalysisPage] Attempting to get Goal ID: ${foundPotentialRisk.goalId} for user ${currentUserId}, period ${currentPeriod}`);
+        const foundGoal = await getGoalByIdFromService(foundPotentialRisk.goalId, currentUserId, currentPeriod);
         if (!isActive) return;
         if (!foundGoal) {
             console.error(`[RiskCauseAnalysisPage] Goal with ID ${foundPotentialRisk.goalId} not found or context mismatch.`);
-            throw new Error(`Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan atau tidak cocok konteks.`);
+            throw new Error(`Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan atau tidak cocok konteks pengguna/periode.`);
         }
-        console.log(`[RiskCauseAnalysisPage] Fetched Goal:`, foundGoal);
+        console.log(`[RiskCauseAnalysisPage] Fetched Goal:`, JSON.stringify(foundGoal).substring(0, 200));
         if (isActive) setGrandParentGoal(foundGoal);
         
         if (foundCause && isActive) {
             console.log(`[RiskCauseAnalysisPage] Triggering fetchControlMeasures for RC_ID: ${foundCause.id}`);
-            await store.fetchControlMeasures(currentUserId, currentPeriod, foundCause.id);
+            setControlsPageLoading(true);
+            const fetchedControls = await fetchControlMeasuresByRiskCauseIdFromService(foundCause.id, currentUserId, currentPeriod);
+            if (isActive) {
+              setControls(fetchedControls.sort((a, b) => {
+                  const typeOrder = CONTROL_MEASURE_TYPE_KEYS.indexOf(a.controlType) - CONTROL_MEASURE_TYPE_KEYS.indexOf(b.controlType);
+                  if (typeOrder !== 0) return typeOrder;
+                  return (a.sequenceNumber || 0) - (b.sequenceNumber || 0);
+              }));
+              setControlsPageLoading(false);
+            }
+            console.log(`[RiskCauseAnalysisPage] Controls fetched: ${fetchedControls.length}`);
         }
         console.log("[RiskCauseAnalysisPage] Main data fetching complete and states set.");
         
       } catch (error: any) {
         if (!isActive) return;
         const errorMessage = error.message || String(error);
-        console.error("[RiskCauseAnalysisPage] Error in loadPageData:", errorMessage);
-        if (isActive) {
-          toast({ title: "Kesalahan Memuat Data", description: errorMessage.substring(0, 200), variant: "destructive" });
-          router.push(returnPathForButton); 
+        if (typeof errorMessage === 'string' && errorMessage.includes("Maximum call stack size exceeded")) {
+            console.error("[RiskCauseAnalysisPage] Error in loadPageData: Maximum call stack size exceeded (caught).");
+            if(isActive) toast({ title: "Kesalahan Kritis Memuat Data", description: "Terjadi kesalahan internal (Maximum call stack size exceeded). Silakan coba lagi nanti.", variant: "destructive" });
+        } else {
+            console.error("[RiskCauseAnalysisPage] Error in loadPageData:", errorMessage.substring(0, 500));
+            if(isActive) toast({ title: "Kesalahan Memuat Data", description: errorMessage.substring(0, 200), variant: "destructive" });
         }
+        if(isActive) router.push(returnPathForButton); 
       } finally {
         if (isActive) {
             setLocalDataLoading(false);
-            console.log("[RiskCauseAnalysisPage] loadPageData: FINISHED, localDataLoading set to false.");
+            setControlsPageLoading(false); 
+            console.log("[RiskCauseAnalysisPage] loadPageData: FINISHED, localDataLoading & controlsPageLoading set to false.");
         }
       }
     }
     
     if (currentUserId && currentPeriod && riskCauseId && isProfileComplete && !authLoading && !profileLoading) {
+      console.log("[RiskCauseAnalysisPage] Prerequisites met, calling loadPageData.");
       loadPageData();
+    } else {
+      console.log("[RiskCauseAnalysisPage] Prerequisites NOT met. authLoading:", authLoading, "profileLoading:", profileLoading, "isProfileComplete:", isProfileComplete, "currentUserId:", !!currentUserId, "currentPeriod:", !!currentPeriod, "riskCauseId:", !!riskCauseId);
+      if (!authLoading && !profileLoading && isActive) {
+        setLocalDataLoading(false);
+        setControlsPageLoading(false);
+      }
     }
 
     return () => { 
@@ -324,17 +326,16 @@ export default function RiskCauseAnalysisPage() {
     isProfileComplete, 
     authLoading, 
     profileLoading,
-    store, // store is stable, but fetchControlMeasures might change if store definition changes
     reset, 
     router, 
     toast, 
-    searchParams, // from useSearchParams, stable
-    returnPathForButton // memoized
+    searchParams // searchParams is stable from useSearchParams
+    // returnPathForButton is removed as it depends on state set by this effect
   ]);
 
   useEffect(() => {
     if (currentRiskCause) {
-      console.log("[RiskCauseAnalysisPage] currentRiskCause changed, resetting form with:", currentRiskCause);
+      console.log("[RiskCauseAnalysisPage] currentRiskCause changed, resetting form with:", JSON.stringify(currentRiskCause).substring(0,100));
       const formValues = {
         keyRiskIndicator: currentRiskCause.keyRiskIndicator || "",
         riskTolerance: currentRiskCause.riskTolerance || "",
@@ -345,6 +346,7 @@ export default function RiskCauseAnalysisPage() {
       setAiLikelihoodImpactSuggestion(null); 
       setAiKriToleranceSuggestions(null);
     } else {
+       console.log("[RiskCauseAnalysisPage] currentRiskCause is null, resetting form to defaults.");
        reset({ keyRiskIndicator: null, riskTolerance: null, likelihood: null, impact: null });
     }
   }, [currentRiskCause, reset]);
@@ -365,18 +367,16 @@ export default function RiskCauseAnalysisPage() {
     };
     
     try {
-      const updatedCause = await updateRiskCauseInService(currentRiskCause.id, updatedRiskCauseData);
-      if(updatedCause) {
-        // Optimistically update local state, or refetch from store if store is the source of truth
-        setCurrentRiskCause(prev => prev ? { ...prev, ...updatedCause } : null);
-        // If store is used for currentRiskCause, call store update action here
-        // store.updateRiskCauseInState(currentRiskCause.id, updatedCauseData) // Assuming this action exists in store
-        toast({ title: "Sukses", description: `Analisis untuk penyebab risiko ${riskCauseCodeDisplay} telah disimpan.` });
-      } else {
-         throw new Error("Gagal memuat ulang data penyebab setelah update dari service.");
+      await updateRiskCauseInService(currentRiskCause.id, updatedRiskCauseData);
+      const updatedCause = await getRiskCauseByIdFromService(currentRiskCause.id, currentUserId, currentPeriod);
+      if (updatedCause) {
+        setCurrentRiskCause(updatedCause);
+         // Update cause in the global store as well
+        // useAppStore.getState().updateRiskCause(updatedCause.id, updatedCause); // Assuming updateRiskCause action exists
       }
+      toast({ title: "Sukses", description: `Analisis untuk penyebab risiko ${riskCauseCodeDisplay} telah disimpan.` });
     } catch (error:any) {
-      const errorMessage = error.message || String(error);
+      const errorMessage = (error instanceof Error && error.message) ? error.message : String(error);
       console.error("[RiskCauseAnalysisPage] Error saving risk cause analysis:", errorMessage);
       toast({ title: "Gagal Menyimpan", description: errorMessage, variant: "destructive" });
     } finally {
@@ -420,7 +420,7 @@ export default function RiskCauseAnalysisPage() {
         toast({ title: "Kesalahan Saran AI (L/I)", description: errorMsg, variant: "destructive" });
       }
     } catch (error: any) {
-      const errorMessage = error.message || String(error);
+      const errorMessage = (error instanceof Error && error.message) ? error.message : String(error);
       toast({ title: "Kesalahan AI", description: errorMessage, variant: "destructive" });
     } finally {
       setIsAILikelihoodImpactLoading(false);
@@ -448,8 +448,9 @@ export default function RiskCauseAnalysisPage() {
          const errorMsg = result.error || "Gagal mendapatkan saran KRI/Toleransi dari AI.";
         toast({ title: "Kesalahan Saran AI (KRI/Toleransi)", description: errorMsg, variant: "destructive" });
       }
-    } catch (error: any) {
-      const errorMessage = error.message ? String(error.message) : String(error);
+    } catch (error: any)
+     {
+      const errorMessage = (error instanceof Error && error.message) ? error.message : String(error);
       toast({ title: "Kesalahan AI", description: errorMessage, variant: "destructive" });
     } finally {
       setIsAIKriToleranceLoading(false);
@@ -462,55 +463,53 @@ export default function RiskCauseAnalysisPage() {
     setValue('keyRiskIndicator', kri, { shouldValidate: true });
     setValue('riskTolerance', tolerance, { shouldValidate: true });
   };
-  
+
   const handleSaveControlMeasure = async (
     formData: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber'>,
-    existingControlId?: string,
-    isNewControl?: boolean
+    existingControlId?: string
   ) => {
-    if (!currentRiskCause || !parentPotentialRisk || !grandParentGoal || !currentUserId || !currentPeriod) {
-      toast({ title: "Konteks Tidak Lengkap", description: "Data induk atau pengguna/periode tidak tersedia untuk menyimpan pengendalian.", variant: "destructive" });
+    if (!currentUserId || !currentPeriod || !currentRiskCause || !parentPotentialRisk || !grandParentGoal) {
+      toast({ title: "Konteks Tidak Lengkap", description: "Tidak dapat menyimpan tindakan pengendalian.", variant: "destructive" });
       return;
     }
-    setIsSaving(true);
-
+    
     const controlDataForService = {
       ...formData,
-      deadline: formData.deadline ? (typeof formData.deadline === 'string' ? formData.deadline : formData.deadline.toISOString()) : null,
-      budget: formData.budget === null || formData.budget === undefined || isNaN(Number(formData.budget)) ? null : Number(formData.budget),
+      deadline: formData.deadline ? new Date(formData.deadline).toISOString() : null,
     };
 
     try {
-      if (!isNewControl && controlToEdit && controlToEdit.id) {
-        console.log("[ManageCMPage] Updating existing control measure ID:", controlToEdit.id);
-        await updateControlMeasureInService(controlToEdit.id, controlDataForService);
-        toast({ title: "Pengendalian Diperbarui" });
+      if (existingControlId) {
+        await updateControlMeasureInService(existingControlId, controlDataForService);
+        toast({ title: "Sukses", description: "Tindakan pengendalian berhasil diperbarui." });
       } else {
-        console.log("[ManageCMPage] Adding new control measure for RiskCause ID:", currentRiskCause.id);
-        await addControlMeasure(
+        await addControlMeasureToService(
           controlDataForService,
           currentRiskCause.id,
           parentPotentialRisk.id,
           grandParentGoal.id,
           currentUserId,
           currentPeriod,
-          formData.controlType // controlType dari formData
+          formData.controlType
         );
-        toast({ title: "Pengendalian Baru Disimpan" });
+        toast({ title: "Sukses", description: "Tindakan pengendalian baru berhasil ditambahkan." });
       }
-      await store.fetchControlMeasures(currentUserId, currentPeriod, currentRiskCause.id); // Re-fetch controls for this cause
-      setIsControlModalOpen(false);
-      setControlToEdit(null);
+      // Re-fetch controls for this cause
+      setControlsPageLoading(true);
+      const fetchedControls = await fetchControlMeasuresByRiskCauseIdFromService(currentRiskCause.id, currentUserId, currentPeriod);
+      setControls(fetchedControls.sort((a, b) => {
+          const typeOrder = CONTROL_MEASURE_TYPE_KEYS.indexOf(a.controlType) - CONTROL_MEASURE_TYPE_KEYS.indexOf(b.controlType);
+          if (typeOrder !== 0) return typeOrder;
+          return (a.sequenceNumber || 0) - (b.sequenceNumber || 0);
+      }));
+      setControlsPageLoading(false);
     } catch (error: any) {
-      const errorMessage = error.message || String(error);
-      console.error("[ManageCMPage] Error saving control measure:", errorMessage);
+      const errorMessage = (error instanceof Error && error.message) ? error.message : String(error);
+      console.error("[RiskCauseAnalysisPage] Error saving control measure:", errorMessage);
       toast({ title: "Gagal Menyimpan Pengendalian", description: errorMessage, variant: "destructive" });
-    } finally {
-      setIsSaving(false);
     }
   };
-
-
+  
   const confirmDeleteControlMeasure = async () => {
     if (!controlToDelete || !controlToDelete.id || !currentUserId || !currentPeriod || !currentRiskCause) {
         toast({ title: "Gagal Menghapus", description: "Data tidak lengkap untuk menghapus pengendalian.", variant: "destructive"});
@@ -519,11 +518,11 @@ export default function RiskCauseAnalysisPage() {
         return;
     }
     try {
-      await deleteControlMeasure(controlToDelete.id); 
+      await deleteControlMeasureFromService(controlToDelete.id); 
       toast({ title: "Pengendalian Dihapus", description: `Pengendalian "${controlToDelete.description}" telah dihapus.`, variant: "destructive" });
-      await store.fetchControlMeasures(currentUserId, currentPeriod, currentRiskCause.id); // Re-fetch
+      setControls(prev => prev.filter(c => c.id !== controlToDelete.id));
     } catch (error: any) {
-        const errorMessage = error.message || String(error);
+        const errorMessage = (error instanceof Error && error.message) ? error.message : String(error);
         console.error("[RiskCauseAnalysisPage] Error deleting control measure:", errorMessage);
         toast({ title: "Gagal Menghapus Pengendalian", description: errorMessage, variant: "destructive" });
     } finally {
@@ -532,12 +531,14 @@ export default function RiskCauseAnalysisPage() {
     }
   };
 
+
+  const pageIsActuallyLoading = authLoading || profileLoading || localDataLoading;
+
   const goalCodeForDisplay = useMemo(() => `${grandParentGoal?.code || 'S?'}`, [grandParentGoal]);
   const potentialRiskCodeForDisplay = useMemo(() => `${goalCodeForDisplay}.PR${parentPotentialRisk?.sequenceNumber || '?'}`, [goalCodeForDisplay, parentPotentialRisk]);
   const riskCauseCodeDisplay = useMemo(() => `${potentialRiskCodeForDisplay}.PC${currentRiskCause?.sequenceNumber || '?'}`, [potentialRiskCodeForDisplay, currentRiskCause]);
   
-
-  if (authLoading || profileLoading || localDataLoading) { 
+  if (pageIsActuallyLoading) { 
     return (
       <div className="space-y-6 p-4 md:p-6">
          <PageHeader
@@ -554,7 +555,7 @@ export default function RiskCauseAnalysisPage() {
         <div className="flex flex-col items-center justify-center py-10">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
           <p className="text-xl text-muted-foreground">
-            {authLoading || profileLoading ? "Memuat data pengguna..." : "Memuat data analisis penyebab risiko..."}
+            {authLoading || profileLoading ? "Memuat data pengguna..." : (localDataLoading ? "Memuat data penyebab risiko..." : "Memuat data pengendalian...")}
           </p>
         </div>
       </div>
@@ -562,22 +563,22 @@ export default function RiskCauseAnalysisPage() {
   }
   
   if (!currentUser || !isProfileComplete) {
-    return (
+    const targetPath = currentUser ? '/settings' : '/login';
+    const message = !currentUser ? "Sesi tidak ditemukan." : "Profil Anda belum lengkap.";
+     return (
       <div className="space-y-6 p-4 md:p-6">
          <PageHeader
             title="Akses Ditolak"
-            description={!currentUser ? "Sesi tidak ditemukan." : "Profil Anda belum lengkap."}
+            description={message}
             actions={
-                <Button onClick={() => router.push(currentUser ? '/settings' : '/login')} variant="outline">
+                <Button onClick={() => router.push(targetPath)} variant="outline">
                     <ArrowLeft className="mr-2 h-4 w-4" /> {currentUser ? "Ke Pengaturan" : "Ke Halaman Login"}
                 </Button>
             }
         />
         <div className="flex flex-col items-center justify-center py-10">
           <Info className="h-12 w-12 text-destructive mb-4" />
-          <p className="text-xl text-muted-foreground text-center">
-              { !currentUser ? "Sesi tidak ditemukan. Silakan login kembali." : "Profil Anda belum lengkap. Harap lengkapi di Pengaturan."}
-          </p>
+          <p className="text-xl text-muted-foreground text-center">{message}</p>
         </div>
       </div>
     );
@@ -600,7 +601,7 @@ export default function RiskCauseAnalysisPage() {
         <div className="flex flex-col items-center justify-center py-10">
           <Info className="h-12 w-12 text-destructive mb-4" />
           <p className="text-xl text-muted-foreground text-center">
-            Detail penyebab risiko, potensi risiko induk, atau sasaran tidak dapat dimuat. Pastikan ID valid dan data ada dalam konteks UPR/Periode Anda.
+            Gagal memuat data lengkap untuk penyebab risiko ini. Mungkin ID tidak valid atau data induk tidak ditemukan dalam konteks pengguna/periode saat ini.
           </p>
         </div>
       </div>
@@ -644,7 +645,7 @@ export default function RiskCauseAnalysisPage() {
         <CardContent>
           <form onSubmit={handleSubmit(onSubmitAnalysis)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-              <div className="space-y-6">
+              <div className="space-y-6"> {/* Kolom Kiri: KRI & Toleransi */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="keyRiskIndicator">Indikator Kunci Risiko (KRI)</Label>
@@ -682,7 +683,7 @@ export default function RiskCauseAnalysisPage() {
                 </div>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-6"> {/* Kolom Kanan: Kemungkinan, Dampak, Level */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="likelihood">Kemungkinan</Label>
@@ -811,7 +812,7 @@ export default function RiskCauseAnalysisPage() {
         </CardHeader>
         <CardContent className="space-y-4">
              <Link 
-                href={currentRiskCause && parentPotentialRisk && grandParentGoal && currentUserId && currentPeriod ? `/control-measure-manage/new?riskCauseId=${currentRiskCause.id}&potentialRiskId=${parentPotentialRisk.id}&goalId=${grandParentGoal.id}&from=${encodeURIComponent(router.asPath)}` : '#'}
+                href={currentRiskCause && parentPotentialRisk && grandParentGoal && currentUserId && currentPeriod ? `/control-measure-manage/new?riskCauseId=${currentRiskCause.id}&potentialRiskId=${parentPotentialRisk.id}&goalId=${grandParentGoal.id}&from=${encodeURIComponent(`/risk-cause-analysis/${riskCauseId}`)}` : '#'}
                 passHref
               >
                 <Button 
@@ -827,12 +828,12 @@ export default function RiskCauseAnalysisPage() {
               )}
 
 
-            {controlMeasuresLoading ? (
+            {controlsPageLoading ? (
                 <div className="flex items-center justify-center py-4">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     <p className="ml-2 text-sm text-muted-foreground">Memuat data pengendalian...</p>
                 </div>
-            ) : filteredControlMeasures.length === 0 ? (
+            ) : controls.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Belum ada rencana pengendalian untuk penyebab risiko ini.</p>
             ) : (
                 <div className="border rounded-md overflow-x-auto">
@@ -851,7 +852,7 @@ export default function RiskCauseAnalysisPage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredControlMeasures.map(controlItem => { 
+                            {controls.map(controlItem => { 
                                 const controlCode = `${riskCauseCodeDisplay}.${controlItem.controlType}.${controlItem.sequenceNumber}`;
                                 const returnPathForEditControl = `/risk-cause-analysis/${riskCauseId}`;
                                 return (
@@ -927,4 +928,4 @@ export default function RiskCauseAnalysisPage() {
   );
 }
 
-    
+      
