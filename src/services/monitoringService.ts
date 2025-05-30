@@ -19,54 +19,53 @@ import {
 import { MONITORING_SESSIONS_COLLECTION } from './collectionNames';
 
 export async function addMonitoringSession(
-  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'status'>,
+  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period'>,
   userId: string,
-  period: string
+  period: string // Periode aplikasi saat sesi ini dibuat
 ): Promise<MonitoringSession> {
   if (!userId || !period) {
-    throw new Error("User ID dan Periode aplikasi wajib diisi untuk membuat sesi pemantauan.");
+    console.error("Error in addMonitoringSession: userId or period is missing.", { userId, period });
+    throw new Error("User ID atau Periode aplikasi tidak valid untuk memulai sesi pemantauan.");
   }
   if (!data.name || !data.startDate || !data.endDate) {
-    throw new Error("Nama sesi, tanggal mulai, dan tanggal selesai wajib diisi.");
-  }
-  if (new Date(data.startDate) >= new Date(data.endDate)) {
-    throw new Error("Tanggal mulai harus sebelum tanggal selesai.");
+    console.error("Error in addMonitoringSession: name, startDate, or endDate is missing.", data);
+    throw new Error("Nama periode pemantauan, tanggal mulai, dan tanggal selesai harus diisi.");
   }
 
   try {
     const docDataToSave = {
       ...data,
       userId,
-      period, // Periode aplikasi saat sesi dibuat
-      status: 'Direncanakan' as MonitoringSessionStatus,
+      period,
+      status: data.status || 'Aktif', // Default status
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
     console.log("[monitoringService] Data to add MonitoringSession:", JSON.stringify(docDataToSave, null, 2));
     const docRef = await addDoc(collection(db, MONITORING_SESSIONS_COLLECTION), docDataToSave);
-    
-    // Fetch the just-created document to get server-generated timestamps
+
     const newDocSnap = await getDoc(docRef);
     if (!newDocSnap.exists()) {
-      throw new Error("Gagal mengambil sesi pemantauan yang baru saja dibuat.");
+      throw new Error("Gagal mengambil dokumen sesi pemantauan yang baru dibuat.");
     }
     const newDocData = newDocSnap.data();
-    const createdAt = newDocData.createdAt instanceof Timestamp ? newDocData.createdAt.toDate().toISOString() : new Date().toISOString();
-    const updatedAt = newDocData.updatedAt instanceof Timestamp ? newDocData.updatedAt.toDate().toISOString() : new Date().toISOString();
+    const createdAtTimestamp = newDocData.createdAt instanceof Timestamp ? newDocData.createdAt.toDate() : new Date();
+    const updatedAtTimestamp = newDocData.updatedAt instanceof Timestamp ? newDocData.updatedAt.toDate() : new Date();
 
     return {
       id: docRef.id,
       ...data,
       userId,
       period,
-      status: 'Direncanakan',
-      createdAt,
-      updatedAt,
-    };
+      status: newDocData.status as MonitoringSession['status'],
+      createdAt: createdAtTimestamp.toISOString(),
+      updatedAt: updatedAtTimestamp.toISOString(),
+    } as MonitoringSession;
+
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[monitoringService] Error adding monitoring session to Firestore: ", errorMessage);
-    throw new Error(`Gagal menambahkan sesi pemantauan. Pesan: ${errorMessage}`);
+    console.error("Error adding monitoring session to Firestore: ", errorMessage);
+    throw new Error(`Gagal menambahkan sesi pemantauan ke database. Pesan: ${errorMessage}`);
   }
 }
 
@@ -121,7 +120,7 @@ export async function getMonitoringSessions(userId: string, period: string): Pro
 export async function getMonitoringSessionById(sessionId: string, userId: string, period: string): Promise<MonitoringSession | null> {
   if (!sessionId || !userId || !period) {
     console.error("[monitoringService] getMonitoringSessionById: One or more required IDs are missing.", { sessionId, userId, period });
-    throw new Error("ID Sesi, User ID, dan Periode wajib diisi.");
+    throw new Error(`ID Sesi ${sessionId}, User ID${userId}, dan Periode ${period} wajib diisi.`);
   }
   try {
     const docRef = doc(db, MONITORING_SESSIONS_COLLECTION, sessionId);

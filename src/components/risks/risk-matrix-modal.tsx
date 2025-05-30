@@ -12,73 +12,19 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { CalculatedRiskLevelCategory } from '@/lib/types'; // Import this
+import type { CalculatedRiskLevelCategory, LikelihoodLevelDesc, ImpactLevelDesc } from '@/lib/types'; 
+import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types';
+import { getRiskLevelColor, RISK_SCORE_HEATMAP } from '@/app/risk-cause-analysis/[riskCauseId]/page'; // Import heatmap dan fungsi warna
 
 interface RiskMatrixModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-const likelihoodLabels: { [key: number]: string } = {
-  5: "Hampir pasti terjadi (5)",
-  4: "Sering terjadi (4)",
-  3: "Kadang terjadi (3)",
-  2: "Jarang terjadi (2)",
-  1: "Hampir tidak terjadi (1)",
-};
+// Urutkan label berdasarkan nilai numerik untuk tampilan matriks yang benar
+const likelihoodLabelsSorted = LIKELIHOOD_LEVELS_DESC.sort((a, b) => LIKELIHOOD_LEVELS_DESC_MAP[b] - LIKELIHOOD_LEVELS_DESC_MAP[a]); // Desc untuk baris
+const impactLabelsSorted = IMPACT_LEVELS_DESC.sort((a, b) => IMPACT_LEVELS_DESC_MAP[a] - IMPACT_LEVELS_DESC_MAP[b]); // Asc untuk kolom
 
-const impactLabels: { [key: number]: string } = {
-  1: "Tidak Signifikan (1)",
-  2: "Minor (2)",
-  3: "Moderat (3)",
-  4: "Signifikan (4)",
-  5: "Sangat Signifikan (5)",
-};
-
-const matrixData: Array<{ likelihood: number; impact: number; score: number; level: CalculatedRiskLevelCategory }> = [
-  // Likelihood 5
-  { likelihood: 5, impact: 1, score: 5, level: "Sangat Rendah" },
-  { likelihood: 5, impact: 2, score: 10, level: "Rendah" },
-  { likelihood: 5, impact: 3, score: 15, level: "Sedang" },
-  { likelihood: 5, impact: 4, score: 20, level: "Sangat Tinggi" },
-  { likelihood: 5, impact: 5, score: 25, level: "Sangat Tinggi" },
-  // Likelihood 4
-  { likelihood: 4, impact: 1, score: 4, level: "Sangat Rendah" },
-  { likelihood: 4, impact: 2, score: 8, level: "Rendah" },
-  { likelihood: 4, impact: 3, score: 12, level: "Sedang" },
-  { likelihood: 4, impact: 4, score: 16, level: "Tinggi" },
-  { likelihood: 4, impact: 5, score: 20, level: "Sangat Tinggi" },
-  // Likelihood 3
-  { likelihood: 3, impact: 1, score: 3, level: "Sangat Rendah" },
-  { likelihood: 3, impact: 2, score: 6, level: "Rendah" },
-  { likelihood: 3, impact: 3, score: 9, level: "Rendah" },
-  { likelihood: 3, impact: 4, score: 12, level: "Sedang" },
-  { likelihood: 3, impact: 5, score: 15, level: "Sedang" },
-  // Likelihood 2
-  { likelihood: 2, impact: 1, score: 2, level: "Sangat Rendah" },
-  { likelihood: 2, impact: 2, score: 4, level: "Sangat Rendah" },
-  { likelihood: 2, impact: 3, score: 6, level: "Rendah" },
-  { likelihood: 2, impact: 4, score: 8, level: "Rendah" },
-  { likelihood: 2, impact: 5, score: 10, level: "Rendah" },
-  // Likelihood 1
-  { likelihood: 1, impact: 1, score: 1, level: "Sangat Rendah" },
-  { likelihood: 1, impact: 2, score: 2, level: "Sangat Rendah" },
-  { likelihood: 1, impact: 3, score: 3, level: "Sangat Rendah" },
-  { likelihood: 1, impact: 4, score: 4, level: "Sangat Rendah" },
-  { likelihood: 1, impact: 5, score: 5, level: "Sangat Rendah" },
-];
-
-
-const getRiskLevelColorClass = (level: CalculatedRiskLevelCategory): string => {
-  switch (level.toLowerCase()) {
-    case "sangat tinggi": return "bg-red-600 text-white";
-    case "tinggi": return "bg-orange-500 text-white";
-    case "sedang": return "bg-yellow-400 text-black";
-    case "rendah": return "bg-blue-500 text-white"; 
-    case "sangat rendah": return "bg-green-500 text-white";
-    default: return "bg-gray-200 text-gray-800";
-  }
-};
 
 export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) {
   return (
@@ -87,7 +33,7 @@ export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) 
         <DialogHeader>
           <DialogTitle>Matriks Profil Risiko (Heatmap)</DialogTitle>
           <DialogDescription className="text-[10px] sm:text-xs">
-            Panduan visual untuk menentukan level risiko.
+            Panduan visual untuk menentukan level risiko berdasarkan skor dari heatmap.
           </DialogDescription>
         </DialogHeader>
         <div className="py-1 grid grid-cols-1 md:grid-cols-[auto,1fr] gap-1 sm:gap-2 items-start">
@@ -100,21 +46,32 @@ export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) 
               <thead>
                 <tr>
                   <th className="p-0.5 sm:p-1 border border-muted w-10 h-8 sm:h-10"></th> {/* Adjusted padding and height */}
-                  {Object.values(impactLabels).map(label => (
-                    <th key={label} className="p-0.5 sm:p-1 border border-muted font-semibold h-8 sm:h-10 break-words leading-tight align-bottom w-[18%] text-[8px] sm:text-[10px]">{label}</th>
+                  {impactLabelsSorted.map(imLabel => (
+                    <th key={imLabel} className="p-0.5 sm:p-1 border border-muted font-semibold h-8 sm:h-10 break-words leading-tight align-bottom w-[18%] text-[8px] sm:text-[10px]">{imLabel}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {Object.keys(likelihoodLabels).map(lkKeyStr => parseInt(lkKeyStr)).reverse().map(lkKey => {
+                {likelihoodLabelsSorted.map(lkLabel => {
+                  const lkValue = LIKELIHOOD_LEVELS_DESC_MAP[lkLabel];
                   return (
-                    <tr key={lkKey} className="h-8 sm:h-10">
-                      <td className="p-0.5 sm:p-1 border border-muted font-semibold w-10 leading-tight align-middle text-[8px] sm:text-[10px]">{likelihoodLabels[lkKey]}</td>
-                      {Array.from({ length: 5 }, (_, i) => i + 1).map(imKey => {
-                        const cell = matrixData.find(d => d.likelihood === lkKey && d.impact === imKey);
+                    <tr key={lkLabel} className="h-8 sm:h-10">
+                      <td className="p-0.5 sm:p-1 border border-muted font-semibold w-10 leading-tight align-middle text-[8px] sm:text-[10px]">{lkLabel}</td>
+                      {impactLabelsSorted.map(imLabel => {
+                        const imValue = IMPACT_LEVELS_DESC_MAP[imLabel];
+                        const score = RISK_SCORE_HEATMAP[lkValue]?.[imValue];
+                        let level: CalculatedRiskLevelCategory | 'N/A' = 'N/A';
+                        if (score !== undefined && score !== null) {
+                            if (score >= 20) level = 'Sangat Tinggi';
+                            else if (score >= 16) level = 'Tinggi';
+                            else if (score >= 12) level = 'Sedang';
+                            else if (score >= 6) level = 'Rendah';
+                            else if (score >= 1) level = 'Sangat Rendah';
+                        }
+                        
                         return (
-                          <td key={`${lkKey}-${imKey}`} className={`p-0.5 sm:p-1 border border-muted text-center font-bold h-8 sm:h-10 ${cell ? getRiskLevelColorClass(cell.level) : 'bg-gray-100'}`}>
-                            {cell ? cell.score : ''}
+                          <td key={`${lkLabel}-${imLabel}`} className={`p-0.5 sm:p-1 border border-muted text-center font-bold h-8 sm:h-10 ${level !== 'N/A' ? getRiskLevelColor(level) : 'bg-gray-100'}`}>
+                            {score !== undefined ? score : '-'}
                           </td>
                         );
                       })}
@@ -123,7 +80,7 @@ export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) 
                 })}
                   <tr>
                     <td/>
-                    <td className="p-0.5 sm:p-1 pt-1 sm:pt-2 border-t border-muted text-center font-medium h-8 sm:h-10 leading-tight text-[8px] sm:text-[10px]" colSpan={5}>Dampak Risiko</td>
+                    <td className="p-0.5 sm:p-1 pt-1 sm:pt-2 border-t border-muted text-center font-medium h-8 sm:h-10 leading-tight text-[8px] sm:text-[10px]" colSpan={impactLabelsSorted.length}>Dampak Risiko</td>
                 </tr>
               </tbody>
             </table>
@@ -140,7 +97,7 @@ export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) 
                 {level: "Sangat Rendah" as CalculatedRiskLevelCategory, range: "(1-5)"},
               ].map(item => (
                 <div key={item.level} className="flex items-center space-x-1">
-                  <Badge className={`${getRiskLevelColorClass(item.level)} min-w-[80px] justify-center text-[8px] px-1 py-0 h-4 leading-none`}>{item.level}</Badge>
+                  <Badge className={`${getRiskLevelColor(item.level)} min-w-[80px] justify-center text-[8px] px-1 py-0 h-4 leading-none`}>{item.level}</Badge>
                   <span className="text-muted-foreground">{item.range}</span>
                 </div>
               ))}
@@ -153,3 +110,5 @@ export function RiskMatrixModal({ isOpen, onOpenChange }: RiskMatrixModalProps) 
     </ShadCnDialog>
   );
 }
+
+    
