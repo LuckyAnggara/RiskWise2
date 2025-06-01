@@ -81,7 +81,7 @@ interface AppState {
   controlMeasuresLoading: boolean;
   fetchControlMeasures: (userId: string, period: string, riskCauseId_optional?: string) => Promise<void>;
   addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType'>, riskCauseId: string, potentialRiskId: string, goalId: string, userId: string, period: string, controlType: ControlMeasureTypeKey) => Promise<ControlMeasure | null>;
-  updateControlMeasureInStore: (controlMeasureId: string, updatedData: Partial<Omit<ControlMeasure, 'id' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'updatedAt'>>) => Promise<ControlMeasure | null>;
+  updateControlMeasureInStore: (controlMeasureId: string, updatedData: Partial<Omit<ControlMeasure, 'id' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'updatedAt' | 'controlType'>>) => Promise<ControlMeasure | null>;
   deleteControlMeasureFromStore: (controlMeasureId: string) => Promise<void>;
   getControlMeasureById: (controlMeasureId: string, userId: string, period: string) => Promise<ControlMeasure | null>;
 
@@ -102,7 +102,7 @@ interface AppState {
 
 
   // Global actions
-  triggerInitialDataFetch: (userId: string, period: string) => Promise<void>;
+  triggerGlobalDataFetch: (userId: string, period: string) => Promise<void>; // Renamed from triggerInitialDataFetch
   resetAllData: () => void;
 }
 
@@ -124,13 +124,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   riskExposures: [],
   riskExposuresLoading: false,
 
-  triggerInitialDataFetch: async (userId, period) => {
+  triggerGlobalDataFetch: async (userId, period) => { // Renamed from triggerInitialDataFetch
     const uniquePeriodIdentifier = `${userId}|${period}`;
     if (get().dataFetchedForPeriod === uniquePeriodIdentifier && !get().goalsLoading) { 
       console.log(`[AppStore] Data for ${uniquePeriodIdentifier} already fetched or being fetched. Skipping.`);
       return;
     }
-    console.log(`[AppStore] Triggering initial data fetch for ${uniquePeriodIdentifier}`);
+    console.log(`[AppStore] Triggering global data fetch for ${uniquePeriodIdentifier}`); // Updated log
     set({ 
       dataFetchedForPeriod: uniquePeriodIdentifier, 
       goalsLoading: true, 
@@ -143,7 +143,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await get().fetchGoals(userId, period);
     } catch (error) {
-      console.error("[AppStore] Error during triggerInitialDataFetch -> fetchGoals:", error);
+      console.error("[AppStore] Error during triggerGlobalDataFetch -> fetchGoals:", error);
       set({ dataFetchedForPeriod: null }); 
     }
   },
@@ -552,11 +552,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   updateMonitoringSessionStatusInState: async (sessionId, status) => {
     console.log(`[AppStore] Updating status for monitoring session ID: ${sessionId} to ${status}`);
-    const currentUserId = get().currentUserId;
-    const currentPeriod = get().currentPeriod;
+    const currentUserId = get().currentUserId; // Using currentUserId from store state
+    const currentPeriod = get().currentPeriod; // Using currentPeriod from store state
     if (!currentUserId || !currentPeriod) {
-      console.error("[AppStore] updateMonitoringSessionStatusInState: User context not available.");
-      throw new Error("Konteks pengguna tidak tersedia untuk memperbarui sesi.");
+      console.error("[AppStore] updateMonitoringSessionStatusInState: User context not available in store.");
+      throw new Error("Konteks pengguna tidak tersedia di store untuk memperbarui sesi.");
     }
     try {
       await updateMonitoringSessionStatusInService(sessionId, status);
@@ -638,10 +638,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 }));
 
+// This helper function remains the same, but the store method it calls has been renamed.
 export const triggerGlobalDataFetch = (userId: string | null, period: string | null) => {
   const store = useAppStore.getState();
   if (userId && period) {
-    store.triggerInitialDataFetch(userId, period);
+    store.triggerGlobalDataFetch(userId, period); // Calls the renamed store method
   } else {
     store.resetAllData();
   }
