@@ -36,11 +36,13 @@ export default function MonitoringSessionsPage() {
   const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
   const { toast } = useToast(); // Initialize toast
   
-  const monitoringSessions = useAppStore(state => state.monitoringSessions);
-  const monitoringSessionsLoading = useAppStore(state => state.monitoringSessionsLoading);
-  const fetchMonitoringSessions = useAppStore(state => state.fetchMonitoringSessions);
-  const deleteMonitoringSessionFromState = useAppStore(state => state.deleteMonitoringSessionFromState); // Get delete function
-  const triggerGlobalDataFetch = useAppStore(state => state.triggerGlobalDataFetch); 
+  const { 
+    monitoringSessions, 
+    monitoringSessionsLoading, 
+    fetchMonitoringSessions, 
+    deleteMonitoringSessionFromState,
+    triggerGlobalDataFetch // Destructure from store
+  } = useAppStore();
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
@@ -54,7 +56,7 @@ export default function MonitoringSessionsPage() {
   useEffect(() => {
     if (currentUser && currentUserId && currentPeriod && isProfileComplete && !authLoading) {
       if (useAppStore.getState().dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
-         triggerGlobalDataFetch(currentUserId, currentPeriod);
+         triggerGlobalDataFetch(currentUserId, currentPeriod); // Call as a store action
       } else if (monitoringSessions.length === 0 && !monitoringSessionsLoading) {
          fetchMonitoringSessions(currentUserId, currentPeriod);
       }
