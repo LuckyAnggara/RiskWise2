@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { PotentialRisk, Goal, RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, RiskCategory, ControlMeasure, ControlMeasureTypeKey, AppUser } from '@/lib/types';
-import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, CalculatedRiskLevelCategory, RISK_SCORE_HEATMAP, getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance } from '@/lib/types'; // Updated import
+import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, CONTROL_MEASURE_TYPE_KEYS, getControlTypeName, CalculatedRiskLevelCategory, getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance,RISK_SCORE_HEATMAP } from '@/lib/types';
 import { useForm, type SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -31,7 +31,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format, parseISO, isValid as isValidDate, startOfToday } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
-import { useAppStore } from '@/stores/useAppStore'; // Assuming you still want to use store for actions
+import { useAppStore } from '@/stores/useAppStore';
 import { shallow } from 'zustand/shallow';
 
 
@@ -49,7 +49,7 @@ export default function RiskCauseAnalysisPage() {
   const searchParams = useSearchParams();
   const riskCauseId = params.riskCauseId as string;
   
-  const { currentUser, appUser, loading: authLoading, profileLoading, isProfileComplete } = useAuth();
+  const { currentUser, appUser, loading: contextOverallLoading, profileLoading: contextProfileLoading, isProfileComplete } = useAuth();
   const store = useAppStore();
   
   const allControlMeasuresFromStore = useAppStore(state => state.controlMeasures);
@@ -70,7 +70,7 @@ export default function RiskCauseAnalysisPage() {
   }, [allControlMeasuresFromStore, riskCauseId, appUser?.uid, appUser?.activePeriod]);
 
 
-  const [localDataLoading, setLocalDataLoading] = useState(true); 
+  const [localPageDataLoading, setLocalPageDataLoading] = useState(true); 
   const [isSaving, setIsSaving] = useState(false);
   
   const [currentRiskCause, setCurrentRiskCause] = useState<RiskCause | null>(null);
@@ -108,15 +108,12 @@ export default function RiskCauseAnalysisPage() {
   const riskAppetiteFromUser = useMemo(() => appUser?.riskAppetite ?? 5, [appUser]); 
   const uprDisplayName = useMemo(() => appUser?.displayName || "UPR Pengguna", [appUser]);
 
-  const riskCauseIdQuery = searchParams.get('riskCauseId'); 
-  
   const returnPathForButton = useMemo(() => {
     const fromQuery = searchParams.get('from');
     if (fromQuery) return fromQuery;
     if (parentPotentialRisk?.id) return `/all-risks/manage/${parentPotentialRisk.id}`;
-    if (riskCauseIdQuery) return `/risk-analysis`; 
     return '/risk-analysis';
-  }, [searchParams, parentPotentialRisk?.id, riskCauseIdQuery]);
+  }, [searchParams, parentPotentialRisk?.id]);
 
   const {
     register,
@@ -144,75 +141,57 @@ export default function RiskCauseAnalysisPage() {
   
   useEffect(() => {
     let isActive = true;
-    console.log(`[RiskCauseAnalysisPage] Effect for main data fetch TRIGGERED. RC_ID: ${riskCauseId}, UserID: ${currentUserId}, Period: ${currentPeriod}, ProfileComplete: ${isProfileComplete}, AuthLoading: ${authLoading}, ProfileLoading: ${profileLoading}`);
+    console.log(`[RiskCauseAnalysisPage] Effect for main data fetch TRIGGERED. RC_ID: ${riskCauseId}, UserID: ${currentUserId}, Period: ${currentPeriod}, ProfileComplete: ${isProfileComplete}, ContextOverallLoading: ${contextOverallLoading}, ContextProfileLoading: ${contextProfileLoading}`);
 
-    async function loadPageData() {
-      if (!isActive) return;
-      console.log(`[RiskCauseAnalysisPage] loadPageData: Fetching data for RC_ID: ${riskCauseId}, User: ${currentUserId}, Period: ${currentPeriod}`);
+    async function loadPageDataInternal() {
+      if (!isActive || !currentUserId || !currentPeriod || !riskCauseId) {
+        console.warn("[RiskCauseAnalysisPage] loadPageDataInternal: Aborting due to missing critical IDs or inactive component.");
+        if(isActive) setLocalPageDataLoading(false);
+        return;
+      }
       
-      setLocalDataLoading(true);
-      setCurrentRiskCause(null);
-      setParentPotentialRisk(null);
-      setGrandParentGoal(null);
-      setAiLikelihoodImpactSuggestion(null);
-      setAiKriToleranceSuggestions(null);
-      // Do not reset form here if currentRiskCause might be set from store later in this effect
+      console.log(`[RiskCauseAnalysisPage] loadPageDataInternal: Fetching data for RC_ID: ${riskCauseId}, User: ${currentUserId}, Period: ${currentPeriod}`);
+      setLocalPageDataLoading(true);
       
       try {
-        if (!currentUserId || !currentPeriod || !riskCauseId) {
-          throw new Error("Parameter UID, Periode, atau ID Penyebab Risiko tidak valid untuk memuat data.");
-        }
-
         const foundCause = await store.getRiskCauseById(riskCauseId, currentUserId, currentPeriod);
         if (!isActive) return;
-        if (!foundCause) {
-          throw new Error(`Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan atau tidak cocok konteks.`);
-        }
-        console.log("[RiskCauseAnalysisPage] loadPageData: Fetched RiskCause. ID:", foundCause.id);
+        if (!foundCause) throw new Error(`Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan.`);
         if (isActive) setCurrentRiskCause(foundCause);
 
         const foundPotentialRisk = await store.getPotentialRiskById(foundCause.potentialRiskId, currentUserId, currentPeriod);
         if (!isActive) return;
-        if (!foundPotentialRisk) {
-          throw new Error(`Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan atau tidak cocok konteks.`);
-        }
+        if (!foundPotentialRisk) throw new Error(`Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan.`);
         if (isActive) setParentPotentialRisk(foundPotentialRisk);
 
         const foundGoal = await store.getGoalById(foundPotentialRisk.goalId, currentUserId, currentPeriod);
         if (!isActive) return;
-        if (!foundGoal) {
-          throw new Error(`Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan atau tidak cocok konteks.`);
-        }
+        if (!foundGoal) throw new Error(`Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan.`);
         if (isActive) setGrandParentGoal(foundGoal);
         
-        if (foundCause && isActive) { // Ensure foundCause is set before fetching controls
-            console.log("[RiskCauseAnalysisPage] loadPageData: MAIN DATA LOADED SUCCESSFULLY. Now fetching control measures for RC_ID:", foundCause.id);
+        if (foundCause && isActive) {
             await store.fetchControlMeasures(currentUserId, currentPeriod, foundCause.id);
-            console.log("[RiskCauseAnalysisPage] loadPageData: Control measures fetch triggered.");
         }
-
       } catch (error: any) {
         if (!isActive) return;
-        const errorMessage = error.message || String(error);
-        console.error("[RiskCauseAnalysisPage] Error in loadPageData:", errorMessage.substring(0, 500));
+        const errorMessage = error.message || String(error).substring(0, 500);
+        console.error("[RiskCauseAnalysisPage] Error in loadPageDataInternal:", errorMessage);
         if (isActive) {
           toast({ title: "Kesalahan Memuat Data", description: errorMessage, variant: "destructive" });
           router.push(returnPathForButton); 
         }
       } finally {
         if (isActive) {
-          setLocalDataLoading(false);
-          console.log("[RiskCauseAnalysisPage] loadPageData: FINISHED, localDataLoading set to false.");
+          setLocalPageDataLoading(false);
+          console.log("[RiskCauseAnalysisPage] loadPageDataInternal: FINISHED, localPageDataLoading set to false.");
         }
       }
     }
 
-    if (currentUserId && currentPeriod && isProfileComplete && !authLoading && !profileLoading && riskCauseId) {
-        if (!localDataLoading) { 
-            loadPageData();
-        }
-    } else if (!authLoading && !profileLoading && isActive) {
-        if (localDataLoading) setLocalDataLoading(false); 
+    if (currentUserId && currentPeriod && isProfileComplete && !contextOverallLoading && riskCauseId) {
+        loadPageDataInternal();
+    } else if (!contextOverallLoading && isActive) { // If auth/profile loading is done, but other conditions not met
+        if (localPageDataLoading) setLocalPageDataLoading(false); 
     }
 
     return () => { 
@@ -224,13 +203,12 @@ export default function RiskCauseAnalysisPage() {
     currentUserId, 
     currentPeriod, 
     isProfileComplete, 
-    authLoading, 
-    profileLoading,
-    store, // Store is generally stable
-    router, 
-    toast, 
-    searchParams, // searchParams from next/navigation is stable
-    localDataLoading // Added to prevent re-fetch if already loading
+    contextOverallLoading, // Use the overall loading from context
+    contextProfileLoading, // Use profile loading from context
+    store, // store is stable
+    router, // router is stable
+    toast, // toast is stable
+    returnPathForButton // Memoized, stable if its deps are
   ]);
 
   useEffect(() => {
@@ -269,7 +247,7 @@ export default function RiskCauseAnalysisPage() {
     };
     
     try {
-      const updatedCauseFromStore = await store.updateRiskCause(currentRiskCauseId, updatedRiskCauseData, currentUserId, currentPeriod);
+      const updatedCauseFromStore = await store.updateRiskCauseInStore(currentRiskCauseId, updatedRiskCauseData); // Corrected to use renamed store method
       if (updatedCauseFromStore) {
         setCurrentRiskCause(updatedCauseFromStore); 
         toast({ title: "Sukses", description: `Analisis untuk penyebab risiko ${riskCauseCodeDisplay} telah disimpan.` });
@@ -373,10 +351,10 @@ export default function RiskCauseAnalysisPage() {
         return;
     }
     try {
-      await store.deleteControlMeasure(controlToDelete.id); 
+      await store.deleteControlMeasureFromStore(controlToDelete.id); 
       toast({ title: "Pengendalian Dihapus", description: `Pengendalian "${controlToDelete.description}" telah dihapus.`, variant: "destructive" });
       if (currentRiskCause?.id && currentUserId && currentPeriod) {
-        await store.fetchControlMeasures(currentUserId, currentPeriod, currentRiskCause.id); // Re-fetch controls for this cause
+        await store.fetchControlMeasures(currentUserId, currentPeriod, currentRiskCause.id); 
       }
     } catch (error: any) {
         const errorMessage = (error instanceof Error && error.message) ? error.message : String(error).substring(0,200);
@@ -388,13 +366,13 @@ export default function RiskCauseAnalysisPage() {
     }
   };
 
-  const pageIsLoading = authLoading || profileLoading || localDataLoading || controlMeasuresLoadingFromStore;
+  const pageIsEffectivelyLoading = contextOverallLoading || localPageDataLoading || controlMeasuresLoadingFromStore;
 
   const goalCodeForDisplay = useMemo(() => `${grandParentGoal?.code || 'S?'}`, [grandParentGoal]);
   const potentialRiskCodeForDisplay = useMemo(() => `${goalCodeForDisplay}.PR${parentPotentialRisk?.sequenceNumber || '?'}`, [goalCodeForDisplay, parentPotentialRisk]);
   const riskCauseCodeDisplay = useMemo(() => `${potentialRiskCodeForDisplay}.PC${currentRiskCause?.sequenceNumber || '?'}`, [potentialRiskCodeForDisplay, currentRiskCause]);
   
-  if (pageIsLoading) { 
+  if (pageIsEffectivelyLoading) { 
     return (
       <div className="space-y-6 p-4 md:p-6">
          <PageHeader
@@ -411,7 +389,7 @@ export default function RiskCauseAnalysisPage() {
         <div className="flex flex-col items-center justify-center py-10">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
           <p className="text-xl text-muted-foreground">
-            {authLoading || profileLoading ? "Memuat data pengguna..." : (localDataLoading ? "Memuat data utama penyebab risiko..." : (controlMeasuresLoadingFromStore ? "Memuat data pengendalian..." : "Memuat data..."))}
+            {contextOverallLoading ? "Memuat data pengguna/konteks..." : (localPageDataLoading ? "Memuat data penyebab risiko..." : (controlMeasuresLoadingFromStore ? "Memuat data pengendalian..." : "Memuat data..."))}
           </p>
         </div>
       </div>
@@ -785,4 +763,3 @@ export default function RiskCauseAnalysisPage() {
     </div>
   );
 }
-

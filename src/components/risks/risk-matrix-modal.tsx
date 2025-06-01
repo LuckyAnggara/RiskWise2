@@ -13,8 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { CalculatedRiskLevelCategory, LikelihoodLevelDesc, ImpactLevelDesc } from '@/lib/types'; 
-import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types';
-import { getRiskLevelColor, RISK_SCORE_HEATMAP } from '@/app/risk-cause-analysis/[riskCauseId]/page'; // Import heatmap dan fungsi warna
+import { LIKELIHOOD_LEVELS_DESC, IMPACT_LEVELS_DESC, LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP,  getRiskLevelColor, RISK_SCORE_HEATMAP  } from '@/lib/types';
+
 
 interface RiskMatrixModalProps {
   isOpen: boolean;

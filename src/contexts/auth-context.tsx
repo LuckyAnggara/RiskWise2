@@ -11,7 +11,8 @@ import type { AppUser } from '@/lib/types';
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   appUser: AppUser | null;
-  loading: boolean;
+  loading: boolean; // This is isLoadingOverall (authLoading || profileLoading)
+  profileLoading: boolean; // Explicitly provide profileLoading status
   isProfileComplete: boolean;
   refreshAppUser: () => Promise<void>;
 }
@@ -37,23 +38,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("[AuthContext] fetchAppUser: AppUser data from Firestore:", JSON.stringify(userDoc));
         if (userDoc) {
           setAppUser(userDoc);
-          // Cek kelengkapan profil di sini
           const profileIsComplete = !!(userDoc.displayName && userDoc.uprId && userDoc.activePeriod && userDoc.availablePeriods && userDoc.availablePeriods.length > 0);
           setIsProfileComplete(profileIsComplete);
           console.log("[AuthContext] fetchAppUser: Profile complete status:", profileIsComplete);
         } else {
-          // Pengguna ada di Auth, tapi belum ada dokumen di Firestore, atau profil belum lengkap
-          // Buat objek AppUser minimal untuk menghindari error, dan tandai profil belum lengkap
           setAppUser({
             uid: user.uid,
             email: user.email,
-            displayName: user.displayName || null, // Ambil dari Firebase Auth jika ada
+            displayName: user.displayName || null,
             photoURL: user.photoURL || null,
-            role: 'userSatker', // Role default
-            uprId: user.displayName || null, // UPR ID awal sama dengan displayName jika ada
+            role: 'userSatker',
+            uprId: user.displayName || null,
             activePeriod: null,
             availablePeriods: [],
-            createdAt: new Date().toISOString(), // Placeholder
+            createdAt: new Date().toISOString(),
           });
           setIsProfileComplete(false);
           console.log("[AuthContext] fetchAppUser: No Firestore doc or incomplete, profile set to incomplete.");
@@ -61,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (error: any) {
         const errorMessage = error.message && typeof error.message === 'string' ? error.message : String(error);
         console.error("[AuthContext] fetchAppUser: Failed to fetch/create AppUser from Firestore:", errorMessage);
-        setAppUser(null); // Pastikan appUser null jika ada error
+        setAppUser(null);
         setIsProfileComplete(false);
       } finally {
         setProfileLoading(false);
@@ -98,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAppUser = useCallback(async () => {
     if (currentUser) {
       console.log(`[AuthContext] refreshAppUser called for UID: ${currentUser.uid}`);
-      setProfileLoading(true); // Set loading true before fetching
+      setProfileLoading(true);
       try {
         const userDoc = await getUserDocument(currentUser.uid);
         console.log("[AuthContext] refreshAppUser: AppUser data from Firestore:", JSON.stringify(userDoc));
@@ -108,8 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsProfileComplete(profileIsComplete);
           console.log("[AuthContext] refreshAppUser: Profile complete status:", profileIsComplete);
         } else {
-          // Jika dokumen tidak ditemukan setelah refresh (seharusnya tidak terjadi jika update berhasil)
-          // Tetap set ke minimal dan incomplete
            setAppUser({
             uid: currentUser.uid,
             email: currentUser.email,
@@ -130,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAppUser(null);
         setIsProfileComplete(false);
       } finally {
-        setProfileLoading(false); // Ensure loading is false after attempt
+        setProfileLoading(false);
       }
     } else {
       console.log("[AuthContext] refreshAppUser: No current user, skipping refresh.");
@@ -142,19 +138,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isLoadingOverall = authLoading || profileLoading;
 
-  if (isLoadingOverall) {
+  if (authLoading) { // Show loading screen if Firebase Auth is still loading
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
         <p className="text-xl text-muted-foreground">
-          {authLoading ? "Memverifikasi sesi..." : "Memuat data profil pengguna..."}
+          Memverifikasi sesi...
         </p>
       </div>
     );
   }
+  
+  // At this point, authLoading is false.
+  // If profileLoading is true, AuthProvider's children (AppLayout) might still need to wait
+  // or handle this profileLoading state. The value passed in context will reflect this.
 
   return (
-    <AuthContext.Provider value={{ currentUser, appUser, loading: isLoadingOverall, isProfileComplete, refreshAppUser }}>
+    <AuthContext.Provider value={{ currentUser, appUser, loading: isLoadingOverall, profileLoading, isProfileComplete, refreshAppUser }}>
       {children}
     </AuthContext.Provider>
   );
