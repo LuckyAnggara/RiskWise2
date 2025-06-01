@@ -2,7 +2,7 @@
 "use client";
 
 import { create } from 'zustand';
-import type { Goal, PotentialRisk, RiskCause, ControlMeasure, AppUser, MonitoringSession, RiskExposure, MonitoredControlMeasureData } from '@/lib/types';
+import type { Goal, PotentialRisk, RiskCause, ControlMeasure, AppUser, MonitoringSession, RiskExposure, MonitoredControlMeasureData, ControlMeasureTypeKey } from '@/lib/types'; // Added ControlMeasureTypeKey
 import { 
   addGoal as addGoalToService, 
   getGoals as getGoalsFromService, 
@@ -71,7 +71,7 @@ interface AppState {
   riskCausesLoading: boolean;
   fetchRiskCauses: (userId: string, period: string) => Promise<void>;
   addRiskCauseToStore: (data: Omit<RiskCause, 'id' | 'createdAt' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'sequenceNumber'>, potentialRiskId: string, goalId: string, userId: string, period: string, sequenceNumber: number) => Promise<RiskCause | null>;
-  updateRiskCauseInStore: (riskCauseId: string, updatedData: Partial<Omit<RiskCause, 'id' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber'>>) => Promise<RiskCause | null>;
+  updateRiskCauseInStore: (riskCauseId: string, updatedData: Partial<Omit<RiskCause, 'id' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'analysisUpdatedAt'>>) => Promise<RiskCause | null>;
   deleteRiskCauseFromStore: (riskCauseId: string, userId: string, period: string) => Promise<void>;
   getRiskCauseById: (riskCauseId: string, userId: string, period: string) => Promise<RiskCause | null>;
 
@@ -79,7 +79,7 @@ interface AppState {
   controlMeasures: ControlMeasure[];
   controlMeasuresLoading: boolean;
   fetchControlMeasures: (userId: string, period: string, riskCauseId_optional?: string) => Promise<void>;
-  addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber'>, riskCauseId: string, potentialRiskId: string, goalId: string, userId: string, period: string) => Promise<ControlMeasure | null>;
+  addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType'>, riskCauseId: string, potentialRiskId: string, goalId: string, userId: string, period: string, controlType: ControlMeasureTypeKey) => Promise<ControlMeasure | null>; // Added controlType
   updateControlMeasureInStore: (controlMeasureId: string, updatedData: Partial<Omit<ControlMeasure, 'id' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'updatedAt'>>) => Promise<ControlMeasure | null>;
   deleteControlMeasureFromStore: (controlMeasureId: string) => Promise<void>;
   getControlMeasureById: (controlMeasureId: string, userId: string, period: string) => Promise<ControlMeasure | null>;
@@ -304,16 +304,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   updatePotentialRiskInStore: async (potentialRiskId, updatedData) => {
     console.log(`[AppStore] Updating potential risk ID: ${potentialRiskId}`);
     try {
-      const updatedPR = await updatePotentialRiskInService(potentialRiskId, updatedData);
-      if (updatedPR) {
-        set(state => ({
-          potentialRisks: state.potentialRisks.map(pr => 
-            pr.id === potentialRiskId ? updatedPR : pr
-          ).sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`))
-        }));
-        return updatedPR;
-      }
-      return null;
+      await updatePotentialRiskInService(potentialRiskId, updatedData);
+      
+      set(state => {
+        const newPotentialRisks = state.potentialRisks.map(pr =>
+          pr.id === potentialRiskId ? { ...pr, ...updatedData, updatedAt: new Date().toISOString() } : pr
+        ).sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
+        return { potentialRisks: newPotentialRisks };
+      });
+      const updatedPR = get().potentialRisks.find(pr => pr.id === potentialRiskId);
+      return updatedPR || null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in updatePotentialRiskInStore:", errorMessage);
@@ -392,16 +392,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateRiskCauseInStore: async (riskCauseId, updatedData) => {
     console.log(`[AppStore] Updating risk cause ID: ${riskCauseId}`);
     try {
-      const updatedRC = await updateRiskCauseInService(riskCauseId, updatedData);
-      if(updatedRC) {
-        set(state => ({
-          riskCauses: state.riskCauses.map(rc => 
-            rc.id === riskCauseId ? updatedRC : rc
-          ).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`))
-        }));
-        return updatedRC;
-      }
-      return null;
+      await updateRiskCauseInService(riskCauseId, updatedData);
+      set(state => {
+        const newRiskCauses = state.riskCauses.map(rc =>
+          rc.id === riskCauseId ? { ...rc, ...updatedData, analysisUpdatedAt: new Date().toISOString() } : rc
+        ).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
+        return { riskCauses: newRiskCauses };
+      });
+      const updatedRC = get().riskCauses.find(rc => rc.id === riskCauseId);
+      return updatedRC || null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in updateRiskCauseInStore:", errorMessage);
@@ -472,10 +471,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error(`Gagal memuat tindakan pengendalian dari store: ${errorMessage}`);
     }
   },
-  addControlMeasureToStore: async (data, riskCauseId, potentialRiskId, goalId, userId, period) => {
-    console.log(`[AppStore] Adding control measure to RiskCause: ${riskCauseId}`);
+  addControlMeasureToStore: async (data, riskCauseId, potentialRiskId, goalId, userId, period, controlType) => { // Added controlType parameter
+    console.log(`[AppStore] Adding control measure to RiskCause: ${riskCauseId} with type: ${controlType}`);
     try {
-      const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, userId, period, data.controlType);
+      const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, userId, period, controlType); // Pass controlType
       set(state => ({
         controlMeasures: [...state.controlMeasures, newCM].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
       }));
@@ -489,16 +488,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateControlMeasureInStore: async (controlMeasureId, updatedData) => {
      console.log(`[AppStore] Updating control measure ID: ${controlMeasureId}`);
     try {
-      const updatedCM = await updateControlMeasureInService(controlMeasureId, updatedData);
-      if (updatedCM) {
-        set(state => ({
-          controlMeasures: state.controlMeasures.map(cm => 
-            cm.id === controlMeasureId ? updatedCM : cm
-          ).sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
-        }));
-        return updatedCM;
-      }
-      return null;
+      await updateControlMeasureInService(controlMeasureId, updatedData);
+      set(state => {
+        const newControlMeasures = state.controlMeasures.map(cm => 
+            cm.id === controlMeasureId ? { ...cm, ...updatedData, updatedAt: new Date().toISOString() } : cm
+          ).sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`));
+        return { controlMeasures: newControlMeasures };
+      });
+      const updatedCM = get().controlMeasures.find(cm => cm.id === controlMeasureId);
+      return updatedCM || null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in updateControlMeasureInStore:", errorMessage);
@@ -638,3 +636,6 @@ export const triggerGlobalDataFetch = (userId: string | null, period: string | n
     store.resetAllData();
   }
 };
+
+
+    
