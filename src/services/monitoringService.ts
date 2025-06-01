@@ -15,8 +15,11 @@ import {
   Timestamp,
   serverTimestamp,
   getDoc,
+  deleteDoc, // Added deleteDoc
+  writeBatch, // Added writeBatch
 } from 'firebase/firestore';
-import { MONITORING_SESSIONS_COLLECTION } from './collectionNames';
+import { MONITORING_SESSIONS_COLLECTION, RISK_EXPOSURES_COLLECTION } from './collectionNames'; // Added RISK_EXPOSURES_COLLECTION
+import { deleteRiskExposuresByMonitoringSession } from './riskExposureService'; // Import function to delete related exposures
 
 export async function addMonitoringSession(
   data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period'>,
@@ -37,7 +40,7 @@ export async function addMonitoringSession(
       ...data,
       userId,
       period,
-      status: data.status || 'Aktif', // Default status
+      status: data.status || 'Direncanakan', // Default status
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -171,5 +174,43 @@ export async function updateMonitoringSessionStatus(sessionId: string, status: M
     const errorMessage = error.message || String(error);
     console.error(`[monitoringService] Error updating monitoring session status for ID ${sessionId}: `, errorMessage);
     throw new Error(`Gagal memperbarui status sesi pemantauan. Pesan: ${errorMessage}`);
+  }
+}
+
+export async function deleteMonitoringSession(sessionId: string, userId: string, period: string): Promise<void> {
+  if (!sessionId || !userId || !period) {
+    throw new Error("ID Sesi, User ID, dan Periode aplikasi wajib diisi untuk menghapus sesi.");
+  }
+  console.log(`[monitoringService] Attempting to delete MonitoringSession: ${sessionId} for user: ${userId}, period: ${period}`);
+  const sessionDocRef = doc(db, MONITORING_SESSIONS_COLLECTION, sessionId);
+  const batch = writeBatch(db);
+
+  try {
+    // Verifikasi kepemilikan dan konteks sebelum menghapus
+    const sessionDocSnap = await getDoc(sessionDocRef);
+    if (!sessionDocSnap.exists()) {
+      console.warn(`[monitoringService] MonitoringSession ${sessionId} not found for deletion.`);
+      return; // Sesi tidak ada, tidak perlu dihapus
+    }
+    const sessionData = sessionDocSnap.data();
+    if (sessionData.userId !== userId || sessionData.period !== period) {
+      console.error(`[monitoringService] Attempt to delete MonitoringSession ${sessionId} denied: context mismatch.`);
+      throw new Error("Operasi tidak diizinkan: sesi pemantauan tidak cocok dengan konteks pengguna/periode.");
+    }
+
+    // Hapus semua RiskExposures terkait dengan sesi ini
+    await deleteRiskExposuresByMonitoringSession(sessionId, userId, period, batch);
+    console.log(`[monitoringService] Related RiskExposures for session ${sessionId} added to batch for deletion.`);
+
+    // Hapus dokumen MonitoringSession itu sendiri
+    batch.delete(sessionDocRef);
+    console.log(`[monitoringService] MonitoringSession ${sessionId} added to batch for deletion.`);
+
+    await batch.commit();
+    console.log(`[monitoringService] Successfully deleted MonitoringSession ${sessionId} and its related RiskExposures.`);
+  } catch (error: any) {
+    const errorMessage = error.message || String(error);
+    console.error(`[monitoringService] Error deleting monitoring session ${sessionId}: `, errorMessage);
+    throw new Error(`Gagal menghapus sesi pemantauan dan data terkaitnya. Pesan: ${errorMessage}`);
   }
 }

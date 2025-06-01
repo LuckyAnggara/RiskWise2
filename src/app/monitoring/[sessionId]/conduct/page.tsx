@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import type { RiskCause, ControlMeasure, MonitoringSession, RiskExposure, MonitoredRiskCauseView, MonitoringSessionStatus } from '@/lib/types';
 import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle } from 'lucide-react';
-import { getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance } from '@/app/risk-cause-analysis/[riskCauseId]/page'; // Import shared functions
+import { getCalculatedRiskLevel, getRiskLevelColor, getControlGuidance } from  '@/lib/types';
 import { Separator } from '@/components/ui/separator';
 import { format, parseISO, isValid as isValidDate } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';

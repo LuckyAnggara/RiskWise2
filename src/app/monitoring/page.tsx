@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react'; // Added useState
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/page-header';
@@ -9,21 +9,23 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { PlusCircle, Loader2, PlayCircle, Eye, CheckCircle } from 'lucide-react';
+import { PlusCircle, Loader2, PlayCircle, Eye, CheckCircle, Trash2 } from 'lucide-react'; // Added Trash2
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
 import { format, parseISO } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import type { MonitoringSession, MonitoringSessionStatus } from '@/lib/types';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"; // Added AlertDialog components
+import { useToast } from '@/hooks/use-toast'; // Added useToast
 
 const getStatusBadgeVariant = (status: MonitoringSessionStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
     case 'Aktif':
-      return 'default'; // Primary color (usually blue or dark)
+      return 'default'; 
     case 'Direncanakan':
-      return 'secondary'; // Lighter, less prominent
+      return 'secondary'; 
     case 'Selesai':
-      return 'outline'; // Can be styled with a green border or text later
+      return 'outline'; 
     default:
       return 'secondary';
   }
@@ -32,34 +34,55 @@ const getStatusBadgeVariant = (status: MonitoringSessionStatus): "default" | "se
 export default function MonitoringSessionsPage() {
   const router = useRouter();
   const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
+  const { toast } = useToast(); // Initialize toast
   
   const monitoringSessions = useAppStore(state => state.monitoringSessions);
   const monitoringSessionsLoading = useAppStore(state => state.monitoringSessionsLoading);
   const fetchMonitoringSessions = useAppStore(state => state.fetchMonitoringSessions);
-  const triggerGlobalDataFetch = useAppStore(state => state.triggerInitialDataFetch); // Get the global fetch trigger
+  const deleteMonitoringSessionFromState = useAppStore(state => state.deleteMonitoringSessionFromState); // Get delete function
+  const triggerGlobalDataFetch = useAppStore(state => state.triggerGlobalDataFetch); 
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
   const uprDisplayName = useMemo(() => appUser?.displayName || "UPR Pengguna", [appUser]);
 
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<MonitoringSession | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+
   useEffect(() => {
-    // Menggunakan triggerGlobalDataFetch dari store yang akan memanggil fetchMonitoringSessions
     if (currentUser && currentUserId && currentPeriod && isProfileComplete && !authLoading) {
-      // Panggil triggerGlobalDataFetch jika belum pernah dipanggil untuk periode ini
-      // Atau panggil fetchMonitoringSessions secara langsung jika store belum mengambilnya
-      // Untuk konsistensi, kita akan mengandalkan triggerInitialDataFetch untuk memuat semua data
-      // yang kemudian akan mengisi monitoringSessions
       if (useAppStore.getState().dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
          triggerGlobalDataFetch(currentUserId, currentPeriod);
       } else if (monitoringSessions.length === 0 && !monitoringSessionsLoading) {
-         // Jika dataFetchedForPeriod sudah sesuai tapi monitoringSessions masih kosong, coba fetch lagi
-         // Ini bisa terjadi jika fetch awal gagal atau ada kondisi race.
-         console.log("[MonitoringPage] dataFetchedForPeriod matches, but sessions are empty. Refetching sessions.");
          fetchMonitoringSessions(currentUserId, currentPeriod);
       }
     }
   }, [currentUser, currentUserId, currentPeriod, isProfileComplete, authLoading, fetchMonitoringSessions, triggerGlobalDataFetch, monitoringSessions.length, monitoringSessionsLoading]);
 
+  const handleDeleteSession = (session: MonitoringSession) => {
+    setSessionToDelete(session);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteSession = async () => {
+    if (!sessionToDelete || !currentUserId || !currentPeriod) {
+      toast({ title: "Gagal Menghapus", description: "Konteks tidak lengkap untuk menghapus sesi.", variant: "destructive" });
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await deleteMonitoringSessionFromState(sessionToDelete.id, currentUserId, currentPeriod);
+      toast({ title: "Sesi Dihapus", description: `Sesi pemantauan "${sessionToDelete.name}" dan data terkait telah dihapus.`, variant: "destructive" });
+    } catch (error: any) {
+      toast({ title: "Gagal Menghapus Sesi", description: error.message || "Terjadi kesalahan.", variant: "destructive" });
+    } finally {
+      setIsDeleting(false);
+      setIsDeleteDialogOpen(false);
+      setSessionToDelete(null);
+    }
+  };
 
   if (authLoading || (!currentUser && !authLoading)) {
     return (
@@ -140,7 +163,7 @@ export default function MonitoringSessionsPage() {
                           {session.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right space-x-2">
                         <Link href={`/monitoring/${session.id}/conduct`} passHref>
                           <Button variant="outline" size="sm">
                             {session.status === 'Direncanakan' && <PlayCircle className="mr-2 h-4 w-4" />}
@@ -149,6 +172,16 @@ export default function MonitoringSessionsPage() {
                             {session.status === 'Direncanakan' ? 'Mulai & Lakukan' : (session.status === 'Aktif' ? 'Lanjutkan/Lihat' : 'Lihat Detail')}
                           </Button>
                         </Link>
+                        <Button 
+                            variant="destructive" 
+                            size="icon" 
+                            onClick={() => handleDeleteSession(session)} 
+                            disabled={isDeleting && sessionToDelete?.id === session.id}
+                            aria-label="Hapus sesi pemantauan"
+                            className="h-8 w-8"
+                        >
+                          {isDeleting && sessionToDelete?.id === session.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4" />}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -158,6 +191,22 @@ export default function MonitoringSessionsPage() {
           </CardContent>
         </Card>
       )}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Konfirmasi Hapus Sesi</AlertDialogTitle>
+            <AlertDialogDescription>
+              Apakah Anda yakin ingin menghapus sesi pemantauan "{sessionToDelete?.name}"? Semua data paparan risiko terkait juga akan dihapus. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setIsDeleteDialogOpen(false); setSessionToDelete(null); }} disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteSession} className="bg-destructive hover:bg-destructive/90" disabled={isDeleting}>
+              {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Hapus"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
