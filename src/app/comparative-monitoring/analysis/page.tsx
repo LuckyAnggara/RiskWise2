@@ -24,8 +24,8 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip as RechartsTooltip, // Alias karena ada Tooltip dari shadcn
-  Legend as RechartsLegend, // Alias
+  Tooltip as RechartsTooltip,
+  Legend as RechartsLegend,
   ResponsiveContainer,
 } from 'recharts';
 import {
@@ -96,12 +96,13 @@ export default function ComparativeAnalysisPage() {
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
 
   useEffect(() => {
-    console.log("[AnalysisPage E1] Running.");
+    console.log("[AnalysisPage E1] Initializing session IDs from URL.");
     const idsQueryParam = searchParams.get('sessionIds');
     if (idsQueryParam) {
       const ids = idsQueryParam.split(',').filter(id => id.trim() !== '');
       if (ids.length > 0) {
         setSelectedSessionIds(ids);
+        console.log("[AnalysisPage E1] Session IDs set from URL:", ids);
       } else if (!authLoading) { 
         toast({ title: "Error", description: "Tidak ada sesi yang valid dipilih untuk analisis.", variant: "destructive" });
         router.push('/comparative-monitoring');
@@ -115,43 +116,47 @@ export default function ComparativeAnalysisPage() {
   useEffect(() => {
     let isActive = true;
     const loadSessionDetails = async () => {
-      console.log("[AnalysisPage E2] Running. Deps:", {selectedSessionIdsLength: selectedSessionIds.length, currentUserId, currentPeriod, isProfileComplete, monitoringSessionsLoading: store.monitoringSessionsLoading});
+      console.log("[AnalysisPage E2] Attempting to load session details. Selected IDs:", selectedSessionIds, "Context:", {currentUserId, currentPeriod, isProfileComplete});
       if (selectedSessionIds.length === 0 || !currentUserId || !currentPeriod || !isProfileComplete) {
         if (isActive) {
           setSessionsDetailLoadingState(false);
           setSelectedSessionsDetails([]);
+           console.log("[AnalysisPage E2] Bailed: Missing pre-requisites for loading session details.");
         }
         return;
       }
       if(isActive) setSessionsDetailLoadingState(true);
       
       if (store.monitoringSessionsLoading) {
-        console.log("[AnalysisPage E2] Waiting for global monitoring sessions to load.");
+        console.log("[AnalysisPage E2] Waiting for global monitoring sessions to load from store.");
         return;
       }
 
       try {
         const allSessionsFromStore = store.monitoringSessions;
+        console.log("[AnalysisPage E2] All sessions from store (count):", allSessionsFromStore.length);
         if (allSessionsFromStore.length === 0 && !store.monitoringSessionsLoading) {
-          console.warn("[AnalysisPage E2] Monitoring sessions in store are empty.");
+          console.warn("[AnalysisPage E2] Monitoring sessions in store are empty, and store is not loading.");
            if (isActive) {
             setSelectedSessionsDetails([]);
-            setSessionsDetailLoadingState(false);
            }
-          return;
-        }
-
-        const details = selectedSessionIds
-          .map(id => allSessionsFromStore.find(s => s.id === id && s.userId === currentUserId && s.period === currentPeriod))
-          .filter(s => s !== undefined) as MonitoringSession[];
-        
-        if (isActive) {
-          if (details.length !== selectedSessionIds.length) {
-            console.warn("[AnalysisPage E2] Not all selected sessions found or context mismatch.");
-          }
-          const sortedDetails = details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime());
-          setSelectedSessionsDetails(sortedDetails);
-          console.log("[AnalysisPage E2] Session details set (count):", sortedDetails.length);
+        } else {
+            const details = selectedSessionIds
+            .map(id => {
+              const session = allSessionsFromStore.find(s => s.id === id && s.userId === currentUserId && s.period === currentPeriod);
+              // console.log(`[AnalysisPage E2] Finding session ${id} for user ${currentUserId} period ${currentPeriod}:`, session ? 'Found' : 'Not Found');
+              return session;
+            })
+            .filter(s => s !== undefined) as MonitoringSession[];
+            
+            if (isActive) {
+            if (details.length !== selectedSessionIds.length) {
+                console.warn(`[AnalysisPage E2] Not all selected sessions found or context mismatch. Expected ${selectedSessionIds.length}, found ${details.length}.`);
+            }
+            const sortedDetails = details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime());
+            setSelectedSessionsDetails(sortedDetails);
+            console.log("[AnalysisPage E2] Session details successfully set (count):", sortedDetails.length);
+            }
         }
       } catch (error) {
         if (isActive) {
@@ -162,35 +167,47 @@ export default function ComparativeAnalysisPage() {
         if(isActive) setSessionsDetailLoadingState(false);
       }
     };
-    loadSessionDetails();
+    
+    if (!authLoading) {
+        loadSessionDetails();
+    } else {
+        console.log("[AnalysisPage E2] Skipping session detail load: auth is loading.");
+    }
     return () => { isActive = false };
-  }, [selectedSessionIds, currentUserId, currentPeriod, isProfileComplete, toast, store.monitoringSessions, store.monitoringSessionsLoading]);
+  }, [selectedSessionIds, currentUserId, currentPeriod, isProfileComplete, toast, store.monitoringSessions, store.monitoringSessionsLoading, authLoading]);
+
 
   useEffect(() => {
     let isActive = true;
     const fetchAllDependentData = async () => {
-      console.log("[AnalysisPage E3] Running. Deps:", {selectedSessionsDetailsLength: selectedSessionsDetails.length, sessionsDetailLoadingState});
+      console.log("[AnalysisPage E3] Attempting to fetch dependent data. Selected sessions count:", selectedSessionsDetails.length, "Sessions detail loading:", sessionsDetailLoadingState);
       if (selectedSessionsDetails.length === 0 || !currentUserId || !currentPeriod || sessionsDetailLoadingState) {
-        if (isActive && !sessionsDetailLoadingState) setDependentDataLoadingState(false);
+        if (isActive && !sessionsDetailLoadingState) {
+            setDependentDataLoadingState(false);
+            console.log("[AnalysisPage E3] Bailed: Missing pre-requisites for fetching dependent data or session details still loading.");
+        }
         return;
       }
       if(isActive) setDependentDataLoadingState(true);
       
       try {
-        if (store.dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
-          console.log("[AnalysisPage E3] Global data not yet marked as fetched for current context. Waiting for AppLayout to trigger.");
-           // Dependent data loading should wait if global context itself is not ready.
+        const uniquePeriodIdentifier = `${currentUserId}|${currentPeriod}`;
+        if (store.dataFetchedForPeriod !== uniquePeriodIdentifier) {
+          console.warn(`[AnalysisPage E3] Global data for context ${uniquePeriodIdentifier} not yet marked as fetched. Current store.dataFetchedForPeriod: ${store.dataFetchedForPeriod}. This might lead to incomplete data for aggregation if global data (goals, PRs, etc.) is not ready.`);
         }
 
-        const fetchPromises = selectedSessionsDetails.flatMap(session => [
-          store.fetchRiskExposuresForSession(session.id, currentUserId, currentPeriod),
-          store.fetchMonitoredControlMeasuresForSession(session.id, currentUserId, currentPeriod)
-        ]);
+        const fetchPromises = selectedSessionsDetails.flatMap(session => {
+          console.log(`[AnalysisPage E3] Initiating fetch for session ID: ${session.id}`);
+          return [
+            store.fetchRiskExposuresForSession(session.id, currentUserId, currentPeriod),
+            store.fetchMonitoredControlMeasuresForSession(session.id, currentUserId, currentPeriod)
+          ];
+        });
         
         await Promise.all(fetchPromises);
         
         if (isActive) {
-          console.log("[AnalysisPage E3] All dependent data fetch initiated/completed.");
+          console.log("[AnalysisPage E3] All dependent data fetch calls initiated/completed.");
         }
       } catch (error) {
         if (isActive) {
@@ -205,11 +222,10 @@ export default function ComparativeAnalysisPage() {
     return () => { isActive = false };
   }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoadingState, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast, store.dataFetchedForPeriod]);
 
-  useEffect(() => {
+ useEffect(() => {
     let isActive = true;
     
     const aggregateComparativeData = async () => {
-      console.log("[AnalysisPage E4] Attempting to aggregate comparative data.");
       if(isActive) setProcessingComparativeDataState(true);
 
       const {
@@ -219,56 +235,47 @@ export default function ComparativeAnalysisPage() {
         riskCausesLoading, potentialRisksLoading, goalsLoading
       } = store;
 
-      const globalDataReady = !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading;
-      const sessionSpecificDataReady = !riskExposuresLoading && !monitoredControlMeasuresLoading;
+      const globalDataStoresLoading = goalsLoading || potentialRisksLoading || riskCausesLoading || controlMeasuresLoading;
+      const sessionSpecificDataStoresLoading = riskExposuresLoading || monitoredControlMeasuresLoading;
 
-      const allDataReady = 
+      const prerequisitesMet = 
         !authLoading && isProfileComplete && currentUserId && currentPeriod &&
         selectedSessionsDetails.length > 0 && 
         !sessionsDetailLoadingState && 
-        !dependentDataLoadingState &&
-        globalDataReady && sessionSpecificDataReady;
+        !dependentDataLoadingState;
 
-      console.log("[AnalysisPage E4] Prerequisites check for aggregation. AllDataReady:", allDataReady, "Details:", {
-          authLoading, isProfileComplete, currentUserIdPresent: !!currentUserId, currentPeriodPresent: !!currentPeriod,
+      console.log("[AnalysisPage E4] Checking prerequisites for aggregation. PrerequisitesMet:", prerequisitesMet, "GlobalStoresLoading:", globalDataStoresLoading, "SessionSpecificStoresLoading:", sessionSpecificDataStoresLoading, "Details:", {
+          authLoading, isProfileComplete, currentUserIdP: !!currentUserId, currentPeriodP: !!currentPeriod,
           selectedSessionsDetailsLength: selectedSessionsDetails.length,
           sessionsDetailLoadingState, dependentDataLoadingState,
-          globalDataReady, sessionSpecificDataReady,
           riskExposuresLoading, monitoredControlMeasuresLoading,
           goalsLoading, potentialRisksLoading, riskCausesLoading, controlMeasuresLoading,
       });
       
-      if (!allDataReady) {
+      if (!prerequisitesMet || globalDataStoresLoading || sessionSpecificDataStoresLoading) {
         if(isActive) {
-           if (!authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState &&
-               globalDataReady && sessionSpecificDataReady && selectedSessionsDetails.length === 0
-             ) {
-                console.log("[AnalysisPage E4] All loading complete, but no session details to process. Stopping processing.");
-                setProcessingComparativeDataState(false);
-                setComparativeData([]);
-           } else if (!authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState && !globalDataReady && !sessionSpecificDataReady) {
-                console.log("[AnalysisPage E4] Core data (goals, PRs, etc. or session specifics) might still be loading or missing. Waiting.");
-           } else {
-                console.log("[AnalysisPage E4] Prerequisites not met or data still loading. Skipping aggregation for now.");
+           console.log("[AnalysisPage E4] Skipping aggregation, prerequisites not met or data stores still loading.");
+           if (!prerequisitesMet && !authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState && !globalDataStoresLoading && !sessionSpecificDataStoresLoading) {
+             console.log("[AnalysisPage E4] All loading complete, but other prerequisites failed. Setting processing to false.");
+             setProcessingComparativeDataState(false);
+             setComparativeData([]);
            }
         }
-        if (isActive && (authLoading || sessionsDetailLoadingState || dependentDataLoadingState || !globalDataReady || !sessionSpecificDataReady)) {
-            // If any core loading is still true, keep processing state true, unless it's just because no sessions were selected
-            if (!(selectedSessionsDetails.length === 0 && !sessionsDetailLoadingState)) {
-                return; // Still waiting for some data
-            }
-        }
-        // If we reach here, it means all loading flags are false, but some other condition wasn't met (e.g. selectedSessionsDetails is empty)
-        if (isActive) setProcessingComparativeDataState(false);
         return;
       }
       
+      console.log("[AnalysisPage E4] Prerequisites MET and all data stores loaded. Proceeding with aggregation.");
+      
       const allRiskCauseIdsAcrossSessions = new Set<string>();
       selectedSessionsDetails.forEach(s => s.riskCauseIdsToMonitor.forEach(rcId => allRiskCauseIdsAcrossSessions.add(rcId)));
+      console.log("[AnalysisPage E4] Unique risk cause IDs to process:", Array.from(allRiskCauseIdsAcrossSessions));
 
       const aggregatedDataPromises = Array.from(allRiskCauseIdsAcrossSessions).map(async rcId => {
         const riskCause = riskCauses.find(rc => rc.id === rcId && rc.userId === currentUserId && rc.period === currentPeriod);
-        if (!riskCause) return null;
+        if (!riskCause) {
+          console.warn(`[AnalysisPage E4 - Aggregation] RiskCause with ID ${rcId} not found in store for current context.`);
+          return null;
+        }
 
         const potentialRisk = potentialRisks.find(pr => pr.id === riskCause.potentialRiskId && pr.userId === currentUserId && pr.period === currentPeriod);
         const goal = potentialRisk ? goals.find(g => g.id === potentialRisk.goalId && g.userId === currentUserId && g.period === currentPeriod) : null;
@@ -279,9 +286,11 @@ export default function ComparativeAnalysisPage() {
 
           const exposure = riskExposures.find(re => re.monitoringSessionId === session.id && re.riskCauseId === rcId && re.userId === currentUserId && re.period === currentPeriod);
           const controlsDataForSessionAndCause = monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId === session.id && mcmd.riskCauseId === rcId && mcmd.userId === currentUserId && mcmd.period === currentPeriod);
+          // console.log(`[AnalysisPage E4 - Aggregation] For RC ${rcId}, Session ${session.id}: Found Exposure:`, exposure, `Found MonitoredControls:`, controlsDataForSessionAndCause.length);
           
           const controlPerformances = controlsDataForSessionAndCause.map(mcmd => {
               const controlDetail = controlMeasures.find(cm => cm.id === mcmd.controlMeasureId && cm.userId === currentUserId && cm.period === currentPeriod);
+              // console.log(`[AnalysisPage E4 - Aggregation] Mapping MCMD ${mcmd.id} (Control ID: ${mcmd.controlMeasureId}): Performance ${mcmd.controlPerformance}, Control Detail:`, controlDetail);
               return {
                   controlId: mcmd.controlMeasureId,
                   controlDesc: controlDetail?.description || "Pengendalian tidak ditemukan",
@@ -300,6 +309,7 @@ export default function ComparativeAnalysisPage() {
         }
         
         if (dataPoints.length > 0) {
+           // console.log(`[AnalysisPage E4 - Aggregation] Generated dataPoints for RC ${rcId}:`, JSON.stringify(dataPoints));
           return {
             riskCauseId: rcId,
             riskCauseCode: `${potentialRisk?.goalCode || 'S?'}.PR${potentialRisk?.sequenceNumber || '?'}.PC${riskCause.sequenceNumber || '?'}`,
@@ -309,6 +319,7 @@ export default function ComparativeAnalysisPage() {
             dataPoints: dataPoints.sort((a,b) => new Date(a.sessionEndDate).getTime() - new Date(b.sessionEndDate).getTime()),
           };
         }
+        console.warn(`[AnalysisPage E4 - Aggregation] No data points generated for RiskCause ID ${rcId}.`);
         return null;
       });
 
@@ -316,7 +327,7 @@ export default function ComparativeAnalysisPage() {
         const results = (await Promise.all(aggregatedDataPromises)).filter(item => item !== null) as RiskCauseComparativeSummary[];
         if (isActive) {
           setComparativeData(results.sort((a,b)=> a.riskCauseCode.localeCompare(b.riskCauseCode, undefined, {numeric:true, sensitivity:'base'})));
-          console.log("[AnalysisPage E4] Aggregation complete. Result count:", results.length);
+          console.log("[AnalysisPage E4] Aggregation complete. Final comparativeData (count):", results.length, "Data:", JSON.stringify(results));
         }
       } catch (error) {
         if (isActive) {
@@ -348,6 +359,7 @@ export default function ComparativeAnalysisPage() {
       <div className="flex flex-col items-center justify-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
         <p className="text-xl text-muted-foreground">Memuat data analisis komparatif...</p>
+        <p className="text-xs text-muted-foreground mt-2">Loading States: Auth({String(authLoading)}), Sessions({String(sessionsDetailLoadingState)}), Dependents({String(dependentDataLoadingState)}), Processing({String(processingComparativeDataState)})</p>
       </div>
     );
   }
@@ -427,6 +439,7 @@ export default function ComparativeAnalysisPage() {
           name: format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID }),
           exposure: dp.exposureValue,
         }));
+        // console.log(`[ChartData - ${summary.riskCauseCode}] Exposure Chart Data:`, JSON.stringify(exposureChartData));
 
         const uniqueControls: Map<string, { desc: string, type: string | null }> = new Map();
         summary.dataPoints.forEach(dp => {
@@ -447,14 +460,26 @@ export default function ComparativeAnalysisPage() {
           });
           return sessionData;
         });
+        // console.log(`[ChartData - ${summary.riskCauseCode}] Control Performance Chart Data:`, JSON.stringify(controlPerformanceChartData));
+        // console.log(`[ChartData - ${summary.riskCauseCode}] Unique Controls for Legend:`, Array.from(uniqueControls.entries()));
 
         const controlPerformanceChartConfig: ChartConfig = {};
         Array.from(uniqueControls.values()).forEach((controlDetails, index) => {
-            controlPerformanceChartConfig[controlDetails.desc] = {
+            controlPerformanceChartConfig[controlDetails.desc] = { 
                 label: `${controlDetails.desc} (${controlDetails.type || 'N/A'})`,
                 color: chartColors[index % chartColors.length],
             };
         });
+
+        const hasAnyExposureData = exposureChartData.some(d => d.exposure !== null && d.exposure !== undefined);
+        const hasAnyControlData = uniqueControls.size > 0 && controlPerformanceChartData.some(
+          sessionData => Array.from(uniqueControls.values()).some(
+            controlDetails => {
+              const perfValue = sessionData[controlDetails.desc];
+              return perfValue !== null && perfValue !== undefined;
+            }
+          )
+        );
 
         return (
           <Card key={summary.riskCauseId}>
@@ -468,11 +493,7 @@ export default function ComparativeAnalysisPage() {
             <CardContent className="space-y-6">
               <div>
                 <h4 className="font-semibold text-sm mb-2">Tren Paparan Risiko (Nilai KRI Penyebab Risiko)</h4>
-                {exposureChartData.every(d => d.exposure === null) ? (
-                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
-                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data paparan risiko untuk ditampilkan.
-                    </div>
-                ) : (
+                {exposureChartData.length > 0 && hasAnyExposureData ? (
                     <ChartContainer config={exposureChartConfig} className="h-[250px] w-full">
                     <LineChart data={exposureChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -480,9 +501,13 @@ export default function ComparativeAnalysisPage() {
                         <YAxis tickLine={false} axisLine={false} tickMargin={8} />
                         <ChartTooltip content={<ChartTooltipContent />} />
                         <RechartsLegend content={<ChartLegendContent />} />
-                        <Line type="monotone" dataKey="exposure" stroke={exposureChartConfig.exposure.color} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} name={exposureChartConfig.exposure.label as string} />
+                        <Line type="monotone" dataKey="exposure" stroke={exposureChartConfig.exposure.color} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} name={exposureChartConfig.exposure.label as string} connectNulls/>
                     </LineChart>
                     </ChartContainer>
+                ) : (
+                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
+                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data paparan risiko untuk ditampilkan pada chart.
+                    </div>
                 )}
                 <ul className="text-xs mt-2 space-y-1">
                   {summary.dataPoints.map(dp => (
@@ -495,11 +520,7 @@ export default function ComparativeAnalysisPage() {
               <Separator />
               <div>
                 <h4 className="font-semibold text-sm mb-2">Tren Kinerja Pengendalian (%)</h4>
-                 {uniqueControls.size === 0 || controlPerformanceChartData.every(sessionData => Array.from(uniqueControls.values()).every(control => sessionData[control.desc] === null)) ? (
-                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
-                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data kinerja pengendalian untuk ditampilkan.
-                    </div>
-                ) : (
+                 {controlPerformanceChartData.length > 0 && uniqueControls.size > 0 && hasAnyControlData ? (
                     <ChartContainer config={controlPerformanceChartConfig} className="h-[300px] w-full">
                     <LineChart data={controlPerformanceChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false}/>
@@ -507,11 +528,11 @@ export default function ComparativeAnalysisPage() {
                         <YAxis domain={[0, 'dataMax + 10']} tickLine={false} axisLine={false} tickMargin={8} />
                         <ChartTooltip content={<ChartTooltipContent />} />
                         <RechartsLegend content={<ChartLegendContent wrapperStyle={{paddingTop: 10}} />} verticalAlign="bottom" />
-                        {Array.from(uniqueControls.values()).map((controlDetails, index) => (
+                        {Array.from(uniqueControls.entries()).map(([controlId, controlDetails], index) => ( 
                         <Line
-                            key={controlDetails.desc}
+                            key={controlId} 
                             type="monotone"
-                            dataKey={controlDetails.desc}
+                            dataKey={controlDetails.desc} 
                             stroke={chartColors[index % chartColors.length]}
                             strokeWidth={2}
                             dot={{ r: 4 }}
@@ -522,6 +543,10 @@ export default function ComparativeAnalysisPage() {
                         ))}
                     </LineChart>
                     </ChartContainer>
+                ) : (
+                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
+                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data kinerja pengendalian untuk ditampilkan pada chart.
+                    </div>
                 )}
                  <ul className="text-xs mt-2 space-y-1">
                   {summary.dataPoints.map(dp => (
