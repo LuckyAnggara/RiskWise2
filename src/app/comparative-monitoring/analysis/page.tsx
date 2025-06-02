@@ -10,13 +10,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Loader2, ArrowLeft, AlertTriangle, BarChart2, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
-import type { MonitoringSession, RiskCause, PotentialRisk, Goal, RiskExposure, MonitoredControlMeasureData } from '@/lib/types';
+import type { MonitoringSession, RiskCause, PotentialRisk, Goal, RiskExposure, MonitoredControlMeasureData, ControlMeasure } from '@/lib/types'; // Added ControlMeasure
 import { format, parseISO } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge'; // Ditambahkan untuk tipe kontrol
-import { getControlTypeName } from '@/lib/types'; // Ditambahkan
+import { Badge } from '@/components/ui/badge';
+import { getControlTypeName } from '@/lib/types';
 
 
 interface ComparativeDataPoint {
@@ -24,11 +24,11 @@ interface ComparativeDataPoint {
   sessionName: string;
   sessionEndDate: string;
   exposureValue: number | null;
-  controlPerformances: Array<{ 
-    controlId: string; 
-    controlDesc: string; 
+  controlPerformances: Array<{
+    controlId: string;
+    controlDesc: string;
     performance: number | null;
-    controlType: string | null; // Nama tipe kontrol, mis. "Preventif"
+    controlType: string | null;
   }>;
 }
 
@@ -47,19 +47,25 @@ export default function ComparativeAnalysisPage() {
   const { toast } = useToast();
   const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
   
-  const store = useAppStore(); // Gunakan instance store untuk akses konsisten
+  const store = useAppStore();
 
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [selectedSessionsDetails, setSelectedSessionsDetails] = useState<MonitoringSession[]>([]);
   const [comparativeData, setComparativeData] = useState<RiskCauseComparativeSummary[]>([]);
   
   const [sessionsDetailLoading, setSessionsDetailLoading] = useState(true);
-  const [dependentDataLoading, setDependentDataLoading] = useState(true); // Untuk riskExposures & monitoredControlMeasuresData
-  const [processingComparativeData, setProcessingComparativeData] = useState(true); // Untuk agregasi akhir
+  const [dependentDataLoading, setDependentDataLoading] = useState(true);
+  const [processingComparativeData, setProcessingComparativeData] = useState(true);
   
   const isLoadingPage = useMemo(() => 
-    authLoading || sessionsDetailLoading || dependentDataLoading || processingComparativeData || store.goalsLoading || store.potentialRisksLoading || store.riskCausesLoading || store.controlMeasuresLoading,
-    [authLoading, sessionsDetailLoading, dependentDataLoading, processingComparativeData, store.goalsLoading, store.potentialRisksLoading, store.riskCausesLoading, store.controlMeasuresLoading]
+    authLoading || sessionsDetailLoading || dependentDataLoading || processingComparativeData || 
+    store.goalsLoading || store.potentialRisksLoading || store.riskCausesLoading || store.controlMeasuresLoading ||
+    store.riskExposuresLoading || store.monitoredControlMeasuresLoading, // Ditambahkan
+    [
+      authLoading, sessionsDetailLoading, dependentDataLoading, processingComparativeData, 
+      store.goalsLoading, store.potentialRisksLoading, store.riskCausesLoading, store.controlMeasuresLoading,
+      store.riskExposuresLoading, store.monitoredControlMeasuresLoading // Ditambahkan
+    ]
   );
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
@@ -68,44 +74,48 @@ export default function ComparativeAnalysisPage() {
   // Efek 1: Mengambil dan mengatur selectedSessionIds dari URL
   useEffect(() => {
     const idsQueryParam = searchParams.get('sessionIds');
+    console.log("[AnalysisPage E1] sessionIds from URL:", idsQueryParam);
     if (idsQueryParam) {
-      const ids = idsQueryParam.split(',');
+      const ids = idsQueryParam.split(',').filter(id => id.trim() !== '');
       if (ids.length > 0) {
         setSelectedSessionIds(ids);
-      } else {
-        toast({ title: "Error", description: "Tidak ada sesi yang dipilih untuk analisis.", variant: "destructive" });
+      } else if (!authLoading && !isLoadingPage) { // Cek loading untuk mencegah redirect prematur
+        toast({ title: "Error", description: "Tidak ada sesi yang valid dipilih untuk analisis.", variant: "destructive" });
         router.push('/comparative-monitoring');
       }
-    } else if (!authLoading && !isLoadingPage) { // Hanya redirect jika tidak sedang loading
+    } else if (!authLoading && !isLoadingPage) {
       toast({ title: "Error", description: "Parameter ID Sesi hilang.", variant: "destructive" });
       router.push('/comparative-monitoring');
     }
-  }, [searchParams, router, toast, authLoading, isLoadingPage]);
+  }, [searchParams, router, toast, authLoading, isLoadingPage]); // isLoadingPage ditambahkan
 
   // Efek 2: Memuat detail sesi pemantauan berdasarkan selectedSessionIds
   useEffect(() => {
-    if (selectedSessionIds.length === 0 || !currentUserId || !currentPeriod || !isProfileComplete) {
-      setSessionsDetailLoading(false);
-      setSelectedSessionsDetails([]);
-      return;
-    }
     let isActive = true;
     const loadSessionDetails = async () => {
+      if (selectedSessionIds.length === 0 || !currentUserId || !currentPeriod || !isProfileComplete) {
+        if (isActive) {
+          setSessionsDetailLoading(false);
+          setSelectedSessionsDetails([]);
+        }
+        return;
+      }
       console.log("[AnalysisPage E2] Loading session details for IDs:", selectedSessionIds);
       if(isActive) setSessionsDetailLoading(true);
       try {
-        const sessionsFromStore = store.monitoringSessions; // Ambil dari store yang sudah ada
+        // Ambil dari store, jika tidak ada, bisa panggil service (tapi store harusnya sudah diisi oleh triggerGlobalDataFetch)
+        const allSessionsFromStore = store.monitoringSessions; 
         const details = selectedSessionIds
-          .map(id => sessionsFromStore.find(s => s.id === id))
+          .map(id => allSessionsFromStore.find(s => s.id === id && s.userId === currentUserId && s.period === currentPeriod))
           .filter(s => s !== undefined) as MonitoringSession[];
         
         if (isActive) {
           if (details.length !== selectedSessionIds.length) {
-            console.warn("[AnalysisPage E2] Not all selected sessions found in current store state. Waiting for store update or global fetch.");
-            // Mungkin perlu pemicu fetch jika data belum lengkap
+            console.warn("[AnalysisPage E2] Not all selected sessions found in current store state or context mismatch.");
           }
-          setSelectedSessionsDetails(details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime()));
-          console.log("[AnalysisPage E2] Session details set:", details.map(d => d.id));
+          const sortedDetails = details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime());
+          setSelectedSessionsDetails(sortedDetails);
+          console.log("[AnalysisPage E2] Session details set (count):", sortedDetails.length);
           setSessionsDetailLoading(false);
         }
       } catch (error) {
@@ -123,27 +133,36 @@ export default function ComparativeAnalysisPage() {
 
   // Efek 3: Memuat data dependen (RiskExposures, MonitoredControlMeasureData) untuk sesi yang dipilih
   useEffect(() => {
-    if (selectedSessionsDetails.length === 0 || !currentUserId || !currentPeriod || sessionsDetailLoading) {
-      if (!sessionsDetailLoading) setDependentDataLoading(false);
-      return;
-    }
     let isActive = true;
     const fetchAllDependentData = async () => {
-      console.log("[AnalysisPage E3] Fetching dependent data for sessions:", selectedSessionsDetails.map(s => s.id));
+      if (selectedSessionsDetails.length === 0 || !currentUserId || !currentPeriod || sessionsDetailLoading) {
+        if (isActive && !sessionsDetailLoading) setDependentDataLoading(false);
+        return;
+      }
+      console.log("[AnalysisPage E3] Fetching dependent data for sessions (count):", selectedSessionsDetails.length);
       if(isActive) setDependentDataLoading(true);
       try {
+        // Pastikan data global (goals, potentialRisks, riskCauses, controlMeasures) sudah atau sedang dimuat oleh triggerGlobalDataFetch
+        // Kita hanya perlu fetch data spesifik sesi di sini.
+        if (store.dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
+          console.log("[AnalysisPage E3] Global data not yet fetched for current context. Waiting for AppLayout's triggerGlobalDataFetch.");
+          // Ini bisa terjadi jika user langsung ke halaman ini. AppLayout akan handle global fetch.
+          // Kita tidak set dependentDataLoading ke false di sini, biarkan efek lain yang handle
+          return;
+        }
+
         const fetchPromises = selectedSessionsDetails.flatMap(session => [
           store.fetchRiskExposuresForSession(session.id, currentUserId, currentPeriod),
           store.fetchMonitoredControlMeasuresForSession(session.id, currentUserId, currentPeriod)
         ]);
         await Promise.all(fetchPromises);
         if (isActive) {
-          console.log("[AnalysisPage E3] All dependent data fetched.");
-          setDependentDataLoading(false);
+          console.log("[AnalysisPage E3] All dependent data fetch initiated.");
+          setDependentDataLoading(false); // Set false karena fetch telah selesai dipicu.
         }
       } catch (error) {
         if (isActive) {
-          console.error("[AnalysisPage E3] Error fetching dependent data:", error);
+          console.error("[AnalysisPage E3] Error initiating dependent data fetch:", error);
           toast({ title: "Gagal Memuat Data Pemantauan Detail", description: String(error), variant: "destructive" });
           setDependentDataLoading(false);
         }
@@ -151,7 +170,7 @@ export default function ComparativeAnalysisPage() {
     };
     fetchAllDependentData();
     return () => { isActive = false };
-  }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoading, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast]);
+  }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoading, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast, store.dataFetchedForPeriod]);
 
 
   // Efek 4: Agregasi data komparatif
@@ -161,13 +180,12 @@ export default function ComparativeAnalysisPage() {
       console.log("[AnalysisPage E4] Attempting to aggregate comparative data.");
       if (isActive) setProcessingComparativeData(true);
 
-      // Ambil state terbaru dari store di dalam fungsi async
-      const currentRiskExposures = useAppStore.getState().riskExposures;
-      const currentMonitoredControls = useAppStore.getState().monitoredControlMeasuresData;
-      const currentControlMeasures = useAppStore.getState().controlMeasures;
-      const currentRiskCauses = useAppStore.getState().riskCauses;
-      const currentPotentialRisks = useAppStore.getState().potentialRisks;
-      const currentGoals = useAppStore.getState().goals;
+      const currentRiskExposures = store.riskExposures;
+      const currentMonitoredControls = store.monitoredControlMeasuresData;
+      const currentControlMeasures = store.controlMeasures;
+      const currentRiskCauses = store.riskCauses;
+      const currentPotentialRisks = store.potentialRisks;
+      const currentGoals = store.goals;
       
       const allRiskCauseIdsAcrossSessions = new Set<string>();
       selectedSessionsDetails.forEach(s => s.riskCauseIdsToMonitor.forEach(rcId => allRiskCauseIdsAcrossSessions.add(rcId)));
@@ -183,11 +201,11 @@ export default function ComparativeAnalysisPage() {
         for (const session of selectedSessionsDetails) {
           if (!session.riskCauseIdsToMonitor.includes(rcId)) continue;
 
-          const exposure = currentRiskExposures.find(re => re.monitoringSessionId === session.id && re.riskCauseId === rcId);
-          const controlsDataForSessionAndCause = currentMonitoredControls.filter(mcmd => mcmd.monitoringSessionId === session.id && mcmd.riskCauseId === rcId);
+          const exposure = currentRiskExposures.find(re => re.monitoringSessionId === session.id && re.riskCauseId === rcId && re.userId === currentUserId && re.period === currentPeriod);
+          const controlsDataForSessionAndCause = currentMonitoredControls.filter(mcmd => mcmd.monitoringSessionId === session.id && mcmd.riskCauseId === rcId && mcmd.userId === currentUserId && mcmd.period === currentPeriod);
           
           const controlPerformances = controlsDataForSessionAndCause.map(mcmd => {
-              const controlDetail = currentControlMeasures.find(cm => cm.id === mcmd.controlMeasureId);
+              const controlDetail = currentControlMeasures.find(cm => cm.id === mcmd.controlMeasureId && cm.userId === currentUserId && cm.period === currentPeriod);
               return {
                   controlId: mcmd.controlMeasureId,
                   controlDesc: controlDetail?.description || "Pengendalian tidak ditemukan",
@@ -212,7 +230,7 @@ export default function ComparativeAnalysisPage() {
             riskCauseDescription: riskCause.description,
             potentialRiskDescription: potentialRisk?.description || "N/A",
             goalDescription: goal?.name || "N/A",
-            dataPoints: dataPoints.sort((a,b) => new Date(a.sessionEndDate).getTime() - new Date(b.endDate).getTime()),
+            dataPoints: dataPoints.sort((a,b) => new Date(a.sessionEndDate).getTime() - new Date(b.sessionEndDate).getTime()),
           };
         }
         return null;
@@ -222,7 +240,7 @@ export default function ComparativeAnalysisPage() {
         const results = (await Promise.all(aggregatedDataPromises)).filter(item => item !== null) as RiskCauseComparativeSummary[];
         if (isActive) {
           setComparativeData(results.sort((a,b)=> a.riskCauseCode.localeCompare(b.riskCauseCode, undefined, {numeric:true, sensitivity:'base'})));
-          console.log("[AnalysisPage E4] Aggregation complete.", results);
+          console.log("[AnalysisPage E4] Aggregation complete. Result count:", results.length);
         }
       } catch (error) {
         if (isActive) {
@@ -234,55 +252,58 @@ export default function ComparativeAnalysisPage() {
       }
     };
     
-    // Kondisi untuk menjalankan agregasi
-    if (
+    const prerequisitesMet = 
       !authLoading && isProfileComplete && currentUserId && currentPeriod &&
       selectedSessionsDetails.length > 0 && 
       !sessionsDetailLoading && 
       !dependentDataLoading &&
-      !store.riskExposuresLoading && // Pastikan data dependen dari store juga sudah selesai dimuat
+      !store.riskExposuresLoading && 
       !store.monitoredControlMeasuresLoading &&
-      !store.goalsLoading && !store.potentialRisksLoading && !store.riskCausesLoading && !store.controlMeasuresLoading // Pastikan data global juga sudah dimuat
-    ) {
-      aggregateComparativeData();
-    } else {
-      // Jika prasyarat belum terpenuhi, pastikan processingComparativeData diset false jika tidak ada proses lain yang berjalan
-      if (isActive && !sessionsDetailLoading && !dependentDataLoading && 
-          !store.riskExposuresLoading && !store.monitoredControlMeasuresLoading &&
-          !store.goalsLoading && !store.potentialRisksLoading && !store.riskCausesLoading && !store.controlMeasuresLoading) {
-        setProcessingComparativeData(false);
-      }
-      console.log("[AnalysisPage E4] Skipping aggregation, prerequisites not met.", {
+      !store.goalsLoading && 
+      !store.potentialRisksLoading && 
+      !store.riskCausesLoading && 
+      !store.controlMeasuresLoading;
+
+    console.log("[AnalysisPage E4] Prerequisites for aggregation:", {
         authLoading, isProfileComplete, currentUserId, currentPeriod,
         selectedSessionsDetailsLength: selectedSessionsDetails.length,
         sessionsDetailLoading, dependentDataLoading,
         riskExposuresLoading: store.riskExposuresLoading,
         monitoredControlMeasuresLoading: store.monitoredControlMeasuresLoading,
-        goalsLoading: store.goalsLoading,
-      });
+        goalsLoading: store.goalsLoading, potentialRisksLoading: store.potentialRisksLoading, 
+        riskCausesLoading: store.riskCausesLoading, controlMeasuresLoading: store.controlMeasuresLoading,
+        allPrerequisitesMet: prerequisitesMet
+    });
+
+    if (prerequisitesMet) {
+      aggregateComparativeData();
+    } else {
+      if (isActive && !authLoading && !sessionsDetailLoading && !dependentDataLoading) {
+        // If main page loadings are done but store loadings might still be pending,
+        // keep processingComparativeData true until store loadings are also false.
+        // If all loadings (page and store specific) are false and selectedSessionsDetails is empty, then processing can be false.
+        if (selectedSessionsDetails.length === 0 && 
+            !store.riskExposuresLoading && !store.monitoredControlMeasuresLoading &&
+            !store.goalsLoading && !store.potentialRisksLoading && 
+            !store.riskCausesLoading && !store.controlMeasuresLoading) {
+            setProcessingComparativeData(false);
+        }
+      }
     }
     return () => {isActive = false;};
   }, [
-    // Kondisi Pemicu Utama
-    selectedSessionsDetails, 
-    // Data Store yang Digunakan Langsung dalam Agregasi atau sebagai tanda selesainya fetch dependen
-    store.riskExposures, 
-    store.monitoredControlMeasuresData,
-    store.controlMeasures,
-    store.riskCauses,
-    store.potentialRisks,
-    store.goals,
-    // State loading dari store untuk data dependen dan global
-    store.riskExposuresLoading,
-    store.monitoredControlMeasuresLoading,
-    store.goalsLoading,
-    store.potentialRisksLoading,
-    store.riskCausesLoading,
-    store.controlMeasuresLoading,
-    // Konteks & state lokal
-    currentUserId, currentPeriod, isProfileComplete, authLoading,
-    sessionsDetailLoading, dependentDataLoading,
-    toast // toast stabil
+    // Page specific state
+    selectedSessionsDetails, sessionsDetailLoading, dependentDataLoading,
+    // Auth context
+    authLoading, isProfileComplete, currentUserId, currentPeriod,
+    // Store data arrays (trigger re-run if these actual data arrays change)
+    store.riskExposures, store.monitoredControlMeasuresData,
+    store.controlMeasures, store.riskCauses, store.potentialRisks, store.goals,
+    // Store loading flags (trigger re-run if loading state changes)
+    store.riskExposuresLoading, store.monitoredControlMeasuresLoading,
+    store.goalsLoading, store.potentialRisksLoading,
+    store.riskCausesLoading, store.controlMeasuresLoading,
+    toast // toast is stable
   ]);
 
 
@@ -310,7 +331,7 @@ export default function ComparativeAnalysisPage() {
     return (
          <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">Tidak ada ID sesi yang valid ditemukan di URL.</p>
+            <p className="text-muted-foreground">Tidak ada ID sesi yang valid ditemukan di URL atau sesi tidak ditemukan.</p>
             <Link href="/comparative-monitoring" passHref>
                 <Button variant="outline" className="mt-4"><ArrowLeft className="mr-2 h-4 w-4" /> Kembali ke Pemilihan Sesi</Button>
             </Link>
@@ -370,7 +391,6 @@ export default function ComparativeAnalysisPage() {
           <CardContent className="space-y-4">
             <div>
               <h4 className="font-semibold text-sm mb-2">Tren Paparan Risiko (Nilai KRI Penyebab Risiko)</h4>
-              {/* Placeholder untuk Chart Paparan Risiko */}
               <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
                 <BarChart2 className="inline-block h-5 w-5 mr-2" /> Visualisasi Tren Paparan Risiko akan ditampilkan di sini.
               </div>
@@ -426,3 +446,5 @@ export default function ComparativeAnalysisPage() {
   );
 }
 
+
+    
