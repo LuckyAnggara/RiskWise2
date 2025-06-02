@@ -1,3 +1,4 @@
+
 export const LIKELIHOOD_LEVELS_DESC_MAP = {
   "Hampir tidak terjadi (1)": 1,
   "Jarang terjadi (2)": 2,
@@ -184,7 +185,7 @@ export interface AppUser {
   uprId: string | null; 
   activePeriod: string | null;
   availablePeriods: string[] | null;
-  riskAppetite: number | null;
+  riskAppetite?: number | null; // Added Optional Risk Appetite
   monitoringSettings?: {
     defaultFrequency?: MonitoringPeriodFrequency | null;
   } | null;
@@ -227,7 +228,6 @@ export interface RiskExposure {
   updatedAt?: string; 
 }
 
-// Untuk tampilan di halaman conduct
 export interface MonitoredRiskCauseView extends RiskCause {
   potentialRiskDescription: string;
   goalCode: string;
@@ -237,16 +237,19 @@ export interface MonitoredRiskCauseView extends RiskCause {
 }
 
 export interface MonitoredControlMeasureData {
-  controlMeasureId: string;
-  realizationKCI: string | null;
-  performance?: number | null; 
-  controlActivityNotes: string | null;
-  supportingDocumentUrl?: string | null; 
-  followUpPlan?: string | null;
+  id: string; // Unique ID for this monitoring record, can be controlMeasureId + monitoringSessionId
   monitoringSessionId: string; 
-  riskCauseId: string; 
+  riskCauseId: string; // Parent RiskCause
+  controlMeasureId: string; // The ControlMeasure being monitored
   userId: string;
-  period: string;
-  recordedAt: string;
-  updatedAt?: string;
+  period: string; // Application period when this record was made
+  realizationKCI: string | null;
+  controlEffectivenessNotes: string | null; // Changed from performance
+  controlActivityNotes: string | null;
+  supportingDocumentUrl: string | null; 
+  followUpPlan: string | null;
+  recordedAt: string; 
+  updatedAt?: string; 
 }
+
+    
