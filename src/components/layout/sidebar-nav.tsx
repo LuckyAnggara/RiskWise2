@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity } from "lucide-react"; 
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns } from "lucide-react"; // Added Columns
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -32,6 +32,7 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3, disabled: profileIncomplete }, 
     { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck, disabled: profileIncomplete },
     { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity, disabled: profileIncomplete },
+    { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns, disabled: profileIncomplete },
     { label: "Pengaturan", href: "/settings", icon: Cog, disabled: false }, 
   ];
   
@@ -39,8 +40,6 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     if (navHref === "/") {
       return pathname === "/";
     }
-    // Untuk halaman lain, path saat ini harus dimulai dengan href item navigasi.
-    // Ini akan cocok untuk /goals dan juga /goals/detail/123
     return pathname.startsWith(navHref);
   };
 
@@ -57,7 +56,6 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
                 onClick={() => {
                   if (openMobile) setOpenMobile(false);
                   if (item.disabled) {
-                    // Mungkin tampilkan toast atau pesan jika diperlukan
                     console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap atau data belum siap.`);
                   }
                 }}

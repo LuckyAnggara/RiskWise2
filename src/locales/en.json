@@ -6,7 +6,8 @@
     "goals": "Sasaran",
     "allRisks": "Identifikasi Risiko",
     "riskAnalysis": "Analisis Risiko",
-    "riskPriority": "Prioritas Risiko", 
+    "riskPriority": "Prioritas Risiko",
+    "comparativeMonitoring": "Comparative Analysis",
     "settings": "Pengaturan"
   },
   "AppLayout": {
@@ -520,19 +521,19 @@
   "RiskMatrixModal": {
     "title": "Matriks Profil Risiko (Heatmap)",
     "description": "Panduan visual untuk menentukan level risiko.",
-    "likelihoodAxisLabel": "Kemungkinan", 
+    "likelihoodAxisLabel": "Kemungkinan",
     "impactAxisLabel": "Dampak Risiko",
-    "legendTitle": "Keterangan Level Risiko (Skor):",
+    "legendTitle": "Keterangan Level Risiko (Jumlah Penyebab):",
     "levelVeryHigh": "Sangat Tinggi",
     "levelHigh": "Tinggi",
     "levelMedium": "Sedang",
     "levelLow": "Rendah",
     "levelVeryLow": "Sangat Rendah",
-    "rangeVeryHigh": "(20-25)",
-    "rangeHigh": "(16-19)",
-    "rangeMedium": "(12-15)",
-    "rangeLow": "(6-11)",
-    "rangeVeryLow": "(1-5)",
+    "rangeVeryHigh": "(Skor 20-25)",
+    "rangeHigh": "(Skor 16-19)",
+    "rangeMedium": "(Skor 12-15)",
+    "rangeLow": "(Skor 6-11)",
+    "rangeVeryLow": "(Skor 1-5)",
     "closeButton": "Tutup"
   },
   "General": {
@@ -542,5 +543,3 @@
     "na": "N/A"
   }
 }
-
-    

@@ -7,6 +7,7 @@
     "allRisks": "Identifikasi Risiko",
     "riskAnalysis": "Analisis Risiko",
     "riskPriority": "Prioritas Risiko",
+    "comparativeMonitoring": "Analisis Komparatif",
     "settings": "Pengaturan"
   },
   "AppLayout": {
@@ -542,5 +543,3 @@
     "na": "N/A"
   }
 }
-
-    
