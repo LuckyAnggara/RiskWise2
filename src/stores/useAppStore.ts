@@ -35,7 +35,7 @@ import {
   getMonitoringSessions as getMonitoringSessionsFromService,
   updateMonitoringSessionStatus as updateMonitoringSessionStatusInService,
   getMonitoringSessionById as getMonitoringSessionByIdFromService,
-  deleteMonitoringSession as deleteMonitoringSessionFromService, // Added delete service
+  deleteMonitoringSession as deleteMonitoringSessionFromService, 
 } from '@/services/monitoringService';
 import {
   upsertRiskExposure as upsertRiskExposureToService,
@@ -43,10 +43,10 @@ import {
 } from '@/services/riskExposureService';
 
 interface AppState {
-  // User context (simplified, AuthContext handles full user object)
+  // User context
   currentUserId: string | null;
   currentPeriod: string | null;
-  dataFetchedForPeriod: string | null; // Stores 'userId|period' string for which data was fetched
+  dataFetchedForPeriod: string | null; 
 
   // Goals
   goals: Goal[];
@@ -91,8 +91,8 @@ interface AppState {
   fetchMonitoringSessions: (userId: string, period: string) => Promise<void>;
   addMonitoringSessionToState: (sessionData: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'status'>, userId: string, period: string) => Promise<MonitoringSession | null>;
   updateMonitoringSessionStatusInState: (sessionId: string, status: MonitoringSessionStatus) => Promise<MonitoringSession | null>;
-  deleteMonitoringSessionFromState: (sessionId: string, userId: string, period: string) => Promise<void>; // Added delete function for store
-  getMonitoringSessionByIdFromState: (sessionId: string) => MonitoringSession | null; // Gets from state, for conduct page after creation
+  deleteMonitoringSessionFromState: (sessionId: string, userId: string, period: string) => Promise<void>;
+  getMonitoringSessionByIdFromState: (sessionId: string) => MonitoringSession | null;
 
   // Risk Exposures
   riskExposures: RiskExposure[];
@@ -100,9 +100,9 @@ interface AppState {
   fetchRiskExposuresForSession: (sessionId: string, userId: string, period: string) => Promise<void>;
   upsertRiskExposureInState: (exposureData: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'>, userId: string, period: string) => Promise<RiskExposure | null>;
 
-
   // Global actions
-  triggerGlobalDataFetch: (userId: string, period: string) => Promise<void>; // Renamed from triggerInitialDataFetch
+  setAppContext: (userId: string, period: string) => void; // New action
+  triggerGlobalDataFetch: (userId: string, period: string) => Promise<void>;
   resetAllData: () => void;
 }
 
@@ -124,14 +124,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   riskExposures: [],
   riskExposuresLoading: false,
 
-  triggerGlobalDataFetch: async (userId, period) => { // Renamed from triggerInitialDataFetch
-    const uniquePeriodIdentifier = `${userId}|${period}`;
+  setAppContext: (userId, period) => {
+    console.log(`[AppStore] setAppContext: Setting userId=${userId}, period=${period}`);
+    const oldContextIdentifier = `${get().currentUserId}|${get().currentPeriod}`;
+    const newContextIdentifier = `${userId}|${period}`;
+    
+    set({ currentUserId: userId, currentPeriod: period });
+
+    if (oldContextIdentifier !== newContextIdentifier || get().dataFetchedForPeriod !== newContextIdentifier) {
+      console.log(`[AppStore] setAppContext: Context changed OR data not fetched for ${newContextIdentifier}. Triggering global data fetch.`);
+      get().triggerGlobalDataFetch(userId, period);
+    } else {
+      console.log(`[AppStore] setAppContext: Context same and data already fetched for ${newContextIdentifier}. Not re-fetching.`);
+    }
+  },
+
+  triggerGlobalDataFetch: async (userIdToFetchFor, periodToFetchFor) => {
+    const currentId = userIdToFetchFor; 
+    const currentP = periodToFetchFor;
+
+    if (!currentId || !currentP) {
+      console.warn("[AppStore] triggerGlobalDataFetch: Attempted to fetch data without userId or period provided as args.");
+      set({ dataFetchedForPeriod: null, goalsLoading: false, potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false, riskExposuresLoading: false });
+      return;
+    }
+    
+    const uniquePeriodIdentifier = `${currentId}|${currentP}`;
     if (get().dataFetchedForPeriod === uniquePeriodIdentifier && !get().goalsLoading) { 
       console.log(`[AppStore] Data for ${uniquePeriodIdentifier} already fetched or being fetched. Skipping.`);
       return;
     }
-    console.log(`[AppStore] Triggering global data fetch for ${uniquePeriodIdentifier}`); // Updated log
+    console.log(`[AppStore] Triggering global data fetch for ${uniquePeriodIdentifier}`);
     set({ 
+      currentUserId: currentId, // Also set the context here if it's coming from trigger directly
+      currentPeriod: currentP,
       dataFetchedForPeriod: uniquePeriodIdentifier, 
       goalsLoading: true, 
       potentialRisksLoading: true, 
@@ -141,7 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       riskExposuresLoading: true, 
     });
     try {
-      await get().fetchGoals(userId, period);
+      await get().fetchGoals(currentId, currentP);
     } catch (error) {
       console.error("[AppStore] Error during triggerGlobalDataFetch -> fetchGoals:", error);
       set({ dataFetchedForPeriod: null }); 
@@ -163,9 +189,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       monitoringSessionsLoading: false,
       riskExposures: [],
       riskExposuresLoading: false,
-      dataFetchedForPeriod: null,
       currentUserId: null,
       currentPeriod: null,
+      dataFetchedForPeriod: null,
     });
   },
 
@@ -552,8 +578,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   updateMonitoringSessionStatusInState: async (sessionId, status) => {
     console.log(`[AppStore] Updating status for monitoring session ID: ${sessionId} to ${status}`);
-    const currentUserId = get().currentUserId; // Using currentUserId from store state
-    const currentPeriod = get().currentPeriod; // Using currentPeriod from store state
+    const currentUserId = get().currentUserId; 
+    const currentPeriod = get().currentPeriod; 
     if (!currentUserId || !currentPeriod) {
       console.error("[AppStore] updateMonitoringSessionStatusInState: User context not available in store.");
       throw new Error("Konteks pengguna tidak tersedia di store untuk memperbarui sesi.");
@@ -580,7 +606,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await deleteMonitoringSessionFromService(sessionId, userId, period);
       set(state => ({
         monitoringSessions: state.monitoringSessions.filter(s => s.id !== sessionId),
-        riskExposures: state.riskExposures.filter(re => re.monitoringSessionId !== sessionId), // Also clear child exposures
+        riskExposures: state.riskExposures.filter(re => re.monitoringSessionId !== sessionId), 
       }));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -638,12 +664,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 }));
 
-// This helper function remains the same, but the store method it calls has been renamed.
 export const triggerGlobalDataFetch = (userId: string | null, period: string | null) => {
   const store = useAppStore.getState();
   if (userId && period) {
-    store.triggerGlobalDataFetch(userId, period); // Calls the renamed store method
+    store.triggerGlobalDataFetch(userId, period); 
   } else {
     store.resetAllData();
   }
 };
+

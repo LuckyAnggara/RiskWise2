@@ -27,6 +27,7 @@ import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useAppStore } from '@/stores/useAppStore'; // Import the store
 
 const DEFAULT_FALLBACK_UPR_ID = 'Pengguna';
 const DEFAULT_PERIOD = new Date().getFullYear().toString();
@@ -37,6 +38,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
+  
+  const setStoreAppContext = useAppStore(state => state.setAppContext);
+  const storeDataFetchedForPeriod = useAppStore(state => state.dataFetchedForPeriod);
+  const resetStoreData = useAppStore(state => state.resetAllData);
 
   const currentUprDisplay = appUser?.displayName || appUser?.uprId || DEFAULT_FALLBACK_UPR_ID;
   const currentPeriodDisplay = appUser?.activePeriod || DEFAULT_PERIOD;
@@ -45,34 +50,38 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     console.log("[AppLayout] useEffect triggered. Loading:", loading, "CurrentUser:", !!currentUser, "AppUser:", !!appUser, "isProfileComplete:", isProfileComplete, "Pathname:", pathname);
     const publicPaths = ['/login', '/register'];
     const settingsPath = '/settings';
-    // Halaman /profile-setup tidak lagi relevan karena alur dipindahkan ke /settings
-
-    if (!loading) { // Hanya jalankan logika redirect jika auth dan profile loading selesai
+    
+    if (!loading) { 
       if (currentUser) {
-        // Pengguna sudah login
+        if (appUser && appUser.uid && appUser.activePeriod && isProfileComplete) {
+            console.log(`[AppLayout] AuthContext ready. Setting app context in Zustand: UID=${appUser.uid}, Period=${appUser.activePeriod}`);
+            setStoreAppContext(appUser.uid, appUser.activePeriod);
+        }
+
         if (!isProfileComplete && pathname !== settingsPath) {
           console.log("[AppLayout] Profile incomplete, redirecting to /settings from", pathname);
           router.push(settingsPath);
         } else if (isProfileComplete && publicPaths.includes(pathname)) {
-          // Jika profil sudah lengkap tapi pengguna mencoba akses halaman login/register
           console.log("[AppLayout] Profile complete and on public path, redirecting to /");
           router.push('/');
         }
       } else {
-        // Pengguna belum login
         if (!publicPaths.includes(pathname)) {
           console.log("[AppLayout] User not logged in and not on public path, redirecting to /login from", pathname);
           router.push('/login');
         }
+        if (storeDataFetchedForPeriod !== null) {
+             console.log("[AppLayout] User logged out. Resetting Zustand store.");
+             resetStoreData();
+        }
       }
     }
-  }, [currentUser, appUser, loading, isProfileComplete, router, pathname]);
+  }, [currentUser, appUser, loading, isProfileComplete, router, pathname, setStoreAppContext, storeDataFetchedForPeriod, resetStoreData]);
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
       toast({ title: 'Keluar Berhasil', description: 'Anda telah berhasil keluar.' });
-      // refreshAppUser(); // AuthContext akan menangani ini via onAuthStateChanged
       router.push('/login');
     } catch (error) {
       console.error("Error logging out:", error);
@@ -96,8 +105,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
   
   if (!currentUser && !isPublicPage) {
-    // Ini seharusnya sudah ditangani oleh useEffect di atas yang mengarahkan ke /login
-    // Namun, sebagai fallback, tampilkan loading atau pesan
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -107,10 +114,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  // Jika currentUser ada, tapi appUser masih null (seharusnya tidak terjadi jika loading false)
-  // Atau jika !isProfileComplete dan berada di halaman selain /settings (akan diarahkan oleh useEffect)
-  // Kita tetap render layout dasar, useEffect yang akan mengarahkan jika perlu.
-
   return (
     <SidebarProvider defaultOpen>
       <Sidebar variant="sidebar" collapsible="icon" side="left">
@@ -214,3 +217,4 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+
