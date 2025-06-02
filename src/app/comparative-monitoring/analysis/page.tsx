@@ -18,6 +18,25 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { getControlTypeName } from '@/lib/types';
 
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip, // Alias karena ada Tooltip dari shadcn
+  Legend as RechartsLegend, // Alias
+  ResponsiveContainer,
+} from 'recharts';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  type ChartConfig
+} from "@/components/ui/chart";
+
 
 interface ComparativeDataPoint {
   sessionId: string;
@@ -41,6 +60,17 @@ interface RiskCauseComparativeSummary {
   dataPoints: ComparativeDataPoint[];
 }
 
+const chartColors = [
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--primary))",
+  "hsl(var(--secondary))",
+];
+
+
 export default function ComparativeAnalysisPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -53,10 +83,9 @@ export default function ComparativeAnalysisPage() {
   const [selectedSessionsDetails, setSelectedSessionsDetails] = useState<MonitoringSession[]>([]);
   const [comparativeData, setComparativeData] = useState<RiskCauseComparativeSummary[]>([]);
   
-  // Granular loading states
-  const [sessionsDetailLoadingState, setSessionsDetailLoadingState] = useState(true); // For E2
-  const [dependentDataLoadingState, setDependentDataLoadingState] = useState(true); // For E3
-  const [processingComparativeDataState, setProcessingComparativeDataState] = useState(true); // For E4
+  const [sessionsDetailLoadingState, setSessionsDetailLoadingState] = useState(true);
+  const [dependentDataLoadingState, setDependentDataLoadingState] = useState(true);
+  const [processingComparativeDataState, setProcessingComparativeDataState] = useState(true);
   
   const isLoadingPage = useMemo(() => 
     authLoading || sessionsDetailLoadingState || dependentDataLoadingState || processingComparativeDataState,
@@ -66,7 +95,6 @@ export default function ComparativeAnalysisPage() {
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
 
-  // Effect 1: Get selectedSessionIds from URL
   useEffect(() => {
     console.log("[AnalysisPage E1] Running.");
     const idsQueryParam = searchParams.get('sessionIds');
@@ -84,7 +112,6 @@ export default function ComparativeAnalysisPage() {
     }
   }, [searchParams, router, toast, authLoading]);
 
-  // Effect 2: Load base details for selected monitoring sessions
   useEffect(() => {
     let isActive = true;
     const loadSessionDetails = async () => {
@@ -98,17 +125,15 @@ export default function ComparativeAnalysisPage() {
       }
       if(isActive) setSessionsDetailLoadingState(true);
       
-      // Wait if monitoring sessions are still loading globally
       if (store.monitoringSessionsLoading) {
         console.log("[AnalysisPage E2] Waiting for global monitoring sessions to load.");
-        // setSessionsDetailLoadingState(true) is already called. Return and wait for re-run.
         return;
       }
 
       try {
         const allSessionsFromStore = store.monitoringSessions;
-        if (allSessionsFromStore.length === 0) {
-          console.warn("[AnalysisPage E2] Monitoring sessions in store are empty even after loading finished. This might indicate no sessions for the user/period.");
+        if (allSessionsFromStore.length === 0 && !store.monitoringSessionsLoading) {
+          console.warn("[AnalysisPage E2] Monitoring sessions in store are empty.");
            if (isActive) {
             setSelectedSessionsDetails([]);
             setSessionsDetailLoadingState(false);
@@ -127,22 +152,20 @@ export default function ComparativeAnalysisPage() {
           const sortedDetails = details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime());
           setSelectedSessionsDetails(sortedDetails);
           console.log("[AnalysisPage E2] Session details set (count):", sortedDetails.length);
-          setSessionsDetailLoadingState(false);
         }
       } catch (error) {
         if (isActive) {
           console.error("[AnalysisPage E2] Error loading session details:", error);
           toast({ title: "Gagal Memuat Detail Sesi", description: String(error), variant: "destructive" });
-          setSessionsDetailLoadingState(false);
         }
+      } finally {
+        if(isActive) setSessionsDetailLoadingState(false);
       }
     };
     loadSessionDetails();
     return () => { isActive = false };
   }, [selectedSessionIds, currentUserId, currentPeriod, isProfileComplete, toast, store.monitoringSessions, store.monitoringSessionsLoading]);
 
-
-  // Effect 3: Fetch dependent data (RiskExposures, MonitoredControlMeasures)
   useEffect(() => {
     let isActive = true;
     const fetchAllDependentData = async () => {
@@ -154,10 +177,9 @@ export default function ComparativeAnalysisPage() {
       if(isActive) setDependentDataLoadingState(true);
       
       try {
-        // Global data (goals, PRs, RCs, CMs) should be fetched by AppLayout/useAppStore's setAppContext
-        // We check if it's done before proceeding to aggregation, but fetching session specifics can happen in parallel.
         if (store.dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
-          console.log("[AnalysisPage E3] Global data (goals, etc.) not yet marked as fetched for current context. Fetching session specifics anyway, aggregation will wait.");
+          console.log("[AnalysisPage E3] Global data not yet marked as fetched for current context. Waiting for AppLayout to trigger.");
+           // Dependent data loading should wait if global context itself is not ready.
         }
 
         const fetchPromises = selectedSessionsDetails.flatMap(session => [
@@ -169,22 +191,20 @@ export default function ComparativeAnalysisPage() {
         
         if (isActive) {
           console.log("[AnalysisPage E3] All dependent data fetch initiated/completed.");
-          setDependentDataLoadingState(false); 
         }
       } catch (error) {
         if (isActive) {
           console.error("[AnalysisPage E3] Error initiating dependent data fetch:", error);
           toast({ title: "Gagal Memuat Data Detail Pemantauan", description: String(error), variant: "destructive" });
-          setDependentDataLoadingState(false);
         }
+      } finally {
+        if(isActive) setDependentDataLoadingState(false);
       }
     };
     fetchAllDependentData();
     return () => { isActive = false };
   }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoadingState, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast, store.dataFetchedForPeriod]);
 
-
-  // Effect 4: Aggregate comparative data
   useEffect(() => {
     let isActive = true;
     
@@ -192,7 +212,6 @@ export default function ComparativeAnalysisPage() {
       console.log("[AnalysisPage E4] Attempting to aggregate comparative data.");
       if(isActive) setProcessingComparativeDataState(true);
 
-      // Data from store, ensure they are stable references if not changing.
       const {
         riskExposures, monitoredControlMeasuresData, controlMeasures,
         riskCauses, potentialRisks, goals,
@@ -200,39 +219,47 @@ export default function ComparativeAnalysisPage() {
         riskCausesLoading, potentialRisksLoading, goalsLoading
       } = store;
 
+      const globalDataReady = !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading;
+      const sessionSpecificDataReady = !riskExposuresLoading && !monitoredControlMeasuresLoading;
+
       const allDataReady = 
         !authLoading && isProfileComplete && currentUserId && currentPeriod &&
         selectedSessionsDetails.length > 0 && 
         !sessionsDetailLoadingState && 
         !dependentDataLoadingState &&
-        !riskExposuresLoading && !monitoredControlMeasuresLoading &&
-        !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading;
+        globalDataReady && sessionSpecificDataReady;
 
       console.log("[AnalysisPage E4] Prerequisites check for aggregation. AllDataReady:", allDataReady, "Details:", {
           authLoading, isProfileComplete, currentUserIdPresent: !!currentUserId, currentPeriodPresent: !!currentPeriod,
           selectedSessionsDetailsLength: selectedSessionsDetails.length,
           sessionsDetailLoadingState, dependentDataLoadingState,
+          globalDataReady, sessionSpecificDataReady,
           riskExposuresLoading, monitoredControlMeasuresLoading,
           goalsLoading, potentialRisksLoading, riskCausesLoading, controlMeasuresLoading,
       });
       
       if (!allDataReady) {
         if(isActive) {
-          // If any loading is still true, keep processing state true.
-          // If all loadings are false but selectedSessionsDetails is empty or other core data is missing,
-          // it implies an issue in earlier steps or no data to process.
            if (!authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState &&
-               !riskExposuresLoading && !monitoredControlMeasuresLoading &&
-               !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading &&
-               selectedSessionsDetails.length === 0
+               globalDataReady && sessionSpecificDataReady && selectedSessionsDetails.length === 0
              ) {
                 console.log("[AnalysisPage E4] All loading complete, but no session details to process. Stopping processing.");
                 setProcessingComparativeDataState(false);
-                setComparativeData([]); // Ensure data is cleared if no sessions
+                setComparativeData([]);
+           } else if (!authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState && !globalDataReady && !sessionSpecificDataReady) {
+                console.log("[AnalysisPage E4] Core data (goals, PRs, etc. or session specifics) might still be loading or missing. Waiting.");
            } else {
                 console.log("[AnalysisPage E4] Prerequisites not met or data still loading. Skipping aggregation for now.");
            }
         }
+        if (isActive && (authLoading || sessionsDetailLoadingState || dependentDataLoadingState || !globalDataReady || !sessionSpecificDataReady)) {
+            // If any core loading is still true, keep processing state true, unless it's just because no sessions were selected
+            if (!(selectedSessionsDetails.length === 0 && !sessionsDetailLoadingState)) {
+                return; // Still waiting for some data
+            }
+        }
+        // If we reach here, it means all loading flags are false, but some other condition wasn't met (e.g. selectedSessionsDetails is empty)
+        if (isActive) setProcessingComparativeDataState(false);
         return;
       }
       
@@ -305,18 +332,14 @@ export default function ComparativeAnalysisPage() {
 
     return () => {isActive = false;};
   }, [
-    // Page specific state, ensure these don't cause loops if their references change unnecessarily
     selectedSessionsDetails, sessionsDetailLoadingState, dependentDataLoadingState,
-    // Auth context
     authLoading, isProfileComplete, currentUserId, currentPeriod,
-    // Store data arrays (for their content changes) - these ARE expected to change and re-trigger
     store.riskExposures, store.monitoredControlMeasuresData,
     store.controlMeasures, store.riskCauses, store.potentialRisks, store.goals,
-    // Store loading flags (for their state changes) - these also trigger re-runs until false
     store.riskExposuresLoading, store.monitoredControlMeasuresLoading,
     store.goalsLoading, store.potentialRisksLoading,
     store.riskCausesLoading, store.controlMeasuresLoading,
-    toast // toast is stable
+    toast 
   ]);
 
 
@@ -340,7 +363,7 @@ export default function ComparativeAnalysisPage() {
     )
   }
   
-  if (selectedSessionIds.length === 0 && !isLoadingPage) { // Checked after isLoadingPage
+  if (selectedSessionIds.length === 0 && !isLoadingPage) { 
     return (
          <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -351,6 +374,13 @@ export default function ComparativeAnalysisPage() {
         </div>
     );
   }
+
+  const exposureChartConfig = {
+    exposure: {
+      label: "Paparan Risiko",
+      color: chartColors[0],
+    },
+  } satisfies ChartConfig;
 
 
   return (
@@ -382,7 +412,7 @@ export default function ComparativeAnalysisPage() {
         </CardContent>
       </Card>
       
-      {comparativeData.length === 0 && !isLoadingPage && selectedSessionsDetails.length > 0 && ( // Only show this if sessions were selected but no data
+      {comparativeData.length === 0 && !isLoadingPage && selectedSessionsDetails.length > 0 && ( 
         <Card>
           <CardContent className="pt-6 text-center">
             <AlertTriangle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -392,69 +422,142 @@ export default function ComparativeAnalysisPage() {
         </Card>
       )}
 
-      {comparativeData.map(summary => (
-        <Card key={summary.riskCauseId}>
-          <CardHeader>
-            <CardTitle className="text-lg">{summary.riskCauseCode} - {summary.riskCauseDescription}</CardTitle>
-            <CardDescription className="text-xs">
-              Potensi Risiko: {summary.potentialRiskDescription} <br />
-              Sasaran: {summary.goalDescription}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <h4 className="font-semibold text-sm mb-2">Tren Paparan Risiko (Nilai KRI Penyebab Risiko)</h4>
-              <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
-                <BarChart2 className="inline-block h-5 w-5 mr-2" /> Visualisasi Tren Paparan Risiko akan ditampilkan di sini.
+      {comparativeData.map(summary => {
+        const exposureChartData = summary.dataPoints.map(dp => ({
+          name: format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID }),
+          exposure: dp.exposureValue,
+        }));
+
+        const uniqueControls: Map<string, { desc: string, type: string | null }> = new Map();
+        summary.dataPoints.forEach(dp => {
+          dp.controlPerformances.forEach(cp => {
+            if (!uniqueControls.has(cp.controlId)) {
+              uniqueControls.set(cp.controlId, { desc: cp.controlDesc, type: cp.controlType });
+            }
+          });
+        });
+        
+        const controlPerformanceChartData = summary.dataPoints.map(dp => {
+          const sessionData: { name: string; [key: string]: any } = {
+            name: format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID }),
+          };
+          uniqueControls.forEach((controlDetails, controlId) => {
+            const perf = dp.controlPerformances.find(cp => cp.controlId === controlId);
+            sessionData[controlDetails.desc] = perf ? perf.performance : null; 
+          });
+          return sessionData;
+        });
+
+        const controlPerformanceChartConfig: ChartConfig = {};
+        Array.from(uniqueControls.values()).forEach((controlDetails, index) => {
+            controlPerformanceChartConfig[controlDetails.desc] = {
+                label: `${controlDetails.desc} (${controlDetails.type || 'N/A'})`,
+                color: chartColors[index % chartColors.length],
+            };
+        });
+
+        return (
+          <Card key={summary.riskCauseId}>
+            <CardHeader>
+              <CardTitle className="text-lg">{summary.riskCauseCode} - {summary.riskCauseDescription}</CardTitle>
+              <CardDescription className="text-xs">
+                Potensi Risiko: {summary.potentialRiskDescription} <br />
+                Sasaran: {summary.goalDescription}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h4 className="font-semibold text-sm mb-2">Tren Paparan Risiko (Nilai KRI Penyebab Risiko)</h4>
+                {exposureChartData.every(d => d.exposure === null) ? (
+                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
+                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data paparan risiko untuk ditampilkan.
+                    </div>
+                ) : (
+                    <ChartContainer config={exposureChartConfig} className="h-[250px] w-full">
+                    <LineChart data={exposureChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={(value) => value} />
+                        <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <RechartsLegend content={<ChartLegendContent />} />
+                        <Line type="monotone" dataKey="exposure" stroke={exposureChartConfig.exposure.color} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} name={exposureChartConfig.exposure.label as string} />
+                    </LineChart>
+                    </ChartContainer>
+                )}
+                <ul className="text-xs mt-2 space-y-1">
+                  {summary.dataPoints.map(dp => (
+                      <li key={dp.sessionId}>
+                          <strong>{dp.sessionName}</strong> ({format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID })}): Paparan = {dp.exposureValue ?? <span className="italic text-muted-foreground">N/A</span>}
+                      </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="text-xs mt-2 space-y-1">
-                {summary.dataPoints.map(dp => (
-                    <li key={dp.sessionId}>
-                        <strong>{dp.sessionName}</strong> ({format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID })}): Paparan = {dp.exposureValue ?? <span className="italic text-muted-foreground">N/A</span>}
-                    </li>
-                ))}
-              </ul>
-            </div>
-            <Separator />
-            <div>
-              <h4 className="font-semibold text-sm mb-2">Tren Kinerja Pengendalian (%)</h4>
-              <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
-                <BarChart2 className="inline-block h-5 w-5 mr-2" /> Visualisasi Tren Kinerja Pengendalian akan ditampilkan di sini.
-              </div>
-               <ul className="text-xs mt-2 space-y-1">
-                {summary.dataPoints.map(dp => (
-                  <li key={`${dp.sessionId}-controls`}>
-                    <strong>{dp.sessionName}</strong> ({format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID })}):
-                    {dp.controlPerformances.length > 0 ? (
-                      <ul className="list-disc list-inside pl-4 mt-0.5 space-y-0.5">
-                        {dp.controlPerformances.map(cp => (
-                          <li key={cp.controlId} title={cp.controlDesc}>
-                            <Badge variant="secondary" className="text-[10px] mr-1">{cp.controlType || 'N/A'}</Badge>
-                            {cp.controlDesc.substring(0,40)}... : {cp.performance !== null ? `${cp.performance}%` : <span className="italic text-muted-foreground">N/A</span>}
-                          </li>
+              <Separator />
+              <div>
+                <h4 className="font-semibold text-sm mb-2">Tren Kinerja Pengendalian (%)</h4>
+                 {uniqueControls.size === 0 || controlPerformanceChartData.every(sessionData => Array.from(uniqueControls.values()).every(control => sessionData[control.desc] === null)) ? (
+                     <div className="p-4 border rounded-md bg-muted/30 text-center text-sm text-muted-foreground">
+                        <BarChart2 className="inline-block h-5 w-5 mr-2" /> Tidak ada data kinerja pengendalian untuk ditampilkan.
+                    </div>
+                ) : (
+                    <ChartContainer config={controlPerformanceChartConfig} className="h-[300px] w-full">
+                    <LineChart data={controlPerformanceChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                        <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
+                        <YAxis domain={[0, 'dataMax + 10']} tickLine={false} axisLine={false} tickMargin={8} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <RechartsLegend content={<ChartLegendContent wrapperStyle={{paddingTop: 10}} />} verticalAlign="bottom" />
+                        {Array.from(uniqueControls.values()).map((controlDetails, index) => (
+                        <Line
+                            key={controlDetails.desc}
+                            type="monotone"
+                            dataKey={controlDetails.desc}
+                            stroke={chartColors[index % chartColors.length]}
+                            strokeWidth={2}
+                            dot={{ r: 4 }}
+                            activeDot={{ r: 6 }}
+                            name={`${controlDetails.desc} (${controlDetails.type || 'N/A'})`}
+                            connectNulls
+                        />
                         ))}
-                      </ul>
-                    ) : (
-                      <span className="ml-2 text-muted-foreground italic">Tidak ada data kinerja kontrol.</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <Separator />
-            <div>
-              <h4 className="font-semibold text-sm mb-2">Pembahasan / Observasi (AI Placeholder)</h4>
-              <div className="p-4 border rounded-md bg-muted/30 text-sm text-muted-foreground">
-                <FileText className="inline-block h-5 w-5 mr-2 align-text-bottom" />
-                Area ini akan menampilkan ringkasan atau observasi yang dihasilkan AI mengenai tren paparan risiko dan efektivitas pengendalian untuk penyebab risiko ini, serta bagaimana hal tersebut berkontribusi terhadap minimalisasi risiko.
-                <p className="mt-2 text-xs">Contoh: 
-                "Terlihat tren penurunan paparan risiko dari sesi A ke sesi C, berkorelasi dengan peningkatan kinerja pengendalian X. Namun, pengendalian Y masih menunjukkan kinerja rendah dan perlu perhatian."
-                </p>
+                    </LineChart>
+                    </ChartContainer>
+                )}
+                 <ul className="text-xs mt-2 space-y-1">
+                  {summary.dataPoints.map(dp => (
+                    <li key={`${dp.sessionId}-controls`}>
+                      <strong>{dp.sessionName}</strong> ({format(parseISO(dp.sessionEndDate), "dd MMM yy", { locale: localeID })}):
+                      {dp.controlPerformances.length > 0 ? (
+                        <ul className="list-disc list-inside pl-4 mt-0.5 space-y-0.5">
+                          {dp.controlPerformances.map(cp => (
+                            <li key={cp.controlId} title={cp.controlDesc}>
+                              <Badge variant="secondary" className="text-[10px] mr-1">{cp.controlType || 'N/A'}</Badge>
+                              {cp.controlDesc.substring(0,40)}... : {cp.performance !== null ? `${cp.performance}%` : <span className="italic text-muted-foreground">N/A</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="ml-2 text-muted-foreground italic">Tidak ada data kinerja kontrol.</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+              <Separator />
+              <div>
+                <h4 className="font-semibold text-sm mb-2">Pembahasan / Observasi (AI Placeholder)</h4>
+                <div className="p-4 border rounded-md bg-muted/30 text-sm text-muted-foreground">
+                  <FileText className="inline-block h-5 w-5 mr-2 align-text-bottom" />
+                  Area ini akan menampilkan ringkasan atau observasi yang dihasilkan AI mengenai tren paparan risiko dan efektivitas pengendalian untuk penyebab risiko ini, serta bagaimana hal tersebut berkontribusi terhadap minimalisasi risiko.
+                  <p className="mt-2 text-xs">Contoh: 
+                  "Terlihat tren penurunan paparan risiko dari sesi A ke sesi C, berkorelasi dengan peningkatan kinerja pengendalian X. Namun, pengendalian Y masih menunjukkan kinerja rendah dan perlu perhatian."
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          );
+        })}
     </div>
   );
 }
