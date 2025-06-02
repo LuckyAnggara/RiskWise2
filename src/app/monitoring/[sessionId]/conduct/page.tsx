@@ -1,6 +1,5 @@
-{
-  "use client";
-}
+
+"use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -27,6 +26,7 @@ import { getMonitoringSessionById as getMonitoringSessionByIdFromService } from 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from '@/lib/utils';
+import * as XLSX from 'xlsx';
 
 
 const parseToleranceValue = (toleranceText: string | null): number | null => {
@@ -62,13 +62,6 @@ const calculateControlPerformance = (
 
   let performance: number;
   if (isTargetNegative) { 
-    // Rumus: ((2 * Target - Realisasi) / Target) * 100%
-    // Ini dapat disederhanakan atau diperiksa ulang.
-    // Jika Realisasi = Target, Kinerja = 100%
-    // Jika Realisasi < Target, Kinerja > 100% (Baik)
-    // Jika Realisasi > Target, Kinerja < 100% (Buruk)
-    // Contoh: Target 10 (negatif), Realisasi 5 -> ((2*10 - 5)/10)*100 = (15/10)*100 = 150% (Lebih baik dari target)
-    // Target 10 (negatif), Realisasi 15 -> ((2*10 - 15)/10)*100 = (5/10)*100 = 50% (Lebih buruk dari target)
     performance = ((2 * targetValue) - realizationValue) / targetValue * 100;
 
   } else { 
@@ -347,76 +340,101 @@ export default function ConductMonitoringPage() {
   };
 
   const handleDownloadReport = () => {
-    if (!currentSession || !currentUser || !appUser) {
+    if (!currentSession || !currentUser || !appUser || !currentPeriod) {
       toast({ title: "Konteks tidak lengkap", description: "Data sesi atau pengguna tidak tersedia untuk membuat laporan.", variant: "warning" });
       return;
     }
+    toast({ title: "Membuat Laporan...", description: "Silakan tunggu, laporan XLSX sedang dibuat.", duration: 2000 });
 
-    const reportData = {
-      sesiPemantauan: {
-        nama: currentSession.name,
-        tanggalMulai: format(parseISO(currentSession.startDate), "dd MMMM yyyy", { locale: localeID }),
-        tanggalSelesai: format(parseISO(currentSession.endDate), "dd MMMM yyyy", { locale: localeID }),
-        status: currentSession.status,
-        upr: uprDisplayName,
-        periodeAplikasi: currentPeriod,
-      },
-      detailPemantauan: filteredMonitoredCauses.map(cause => {
-        const parentPotentialRisk = store.potentialRisks.find(pr => pr.id === cause.potentialRiskId);
-        const grandParentGoal = parentPotentialRisk ? store.goals.find(g => g.id === parentPotentialRisk.goalId) : null;
-        
-        return {
-          sasaran: {
-            kode: grandParentGoal?.code || "N/A",
-            nama: grandParentGoal?.name || "N/A",
-            deskripsi: grandParentGoal?.description || "N/A",
-          },
-          potensiRisiko: {
-            kode: parentPotentialRisk?.sequenceNumber ? `${grandParentGoal?.code || 'S?'}.PR${parentPotentialRisk.sequenceNumber}` : "N/A",
-            deskripsi: parentPotentialRisk?.description || "N/A",
-            kategori: parentPotentialRisk?.category || "N/A",
-            pemilik: parentPotentialRisk?.owner || "N/A",
-          },
-          penyebabRisiko: {
-            kode: cause.riskCauseCode,
-            deskripsi: cause.description,
-            sumber: cause.source,
-            kri: cause.keyRiskIndicator || "N/A",
-            toleransi: cause.riskTolerance || "N/A",
-            tingkatRisikoAwal: getCalculatedRiskLevel(cause.likelihood, cause.impact).level,
-            skorRisikoAwal: getCalculatedRiskLevel(cause.likelihood, cause.impact).score,
-            paparanRisiko: {
-              nilai: cause.riskExposure?.exposureValue,
-              catatan: cause.riskExposure?.exposureNotes,
-              tanggalCatat: cause.riskExposure?.recordedAt ? format(parseISO(cause.riskExposure.recordedAt), "dd/MM/yy HH:mm", { locale: localeID }) : "N/A",
-            },
-            pemantauanPengendalian: cause.controls.map(ctrl => {
-              const monitoredData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
-              return {
-                kodePengendalian: `${cause.riskCauseCode}.${ctrl.controlType}.${ctrl.sequenceNumber}`,
-                deskripsiPengendalian: ctrl.description,
-                tipe: getControlTypeName(ctrl.controlType),
-                kciPengendalian: ctrl.keyControlIndicator || "N/A",
-                targetPengendalian: ctrl.target || "N/A",
-                realisasiKCI: monitoredData?.realizationKCI || "N/A",
-                targetNegatif: monitoredData?.isTargetNegative ? "Ya" : "Tidak",
-                kinerjaPengendalian: monitoredData?.controlPerformance !== null ? `${monitoredData?.controlPerformance}%` : "N/A",
-                narasiKegiatan: monitoredData?.controlActivityNarrative || "N/A",
-                dataDukungUrl: monitoredData?.supportingDocumentUrl || "N/A",
-                tanggalCatatMonitor: monitoredData?.recordedAt ? format(parseISO(monitoredData.recordedAt), "dd/MM/yy HH:mm", { locale: localeID }) : "N/A",
-              };
-            }),
-          },
-        };
-      }),
-    };
+    const reportRows: any[] = [];
 
-    console.log("Data Laporan Pemantauan (Konsep):", JSON.stringify(reportData, null, 2));
-    toast({
-      title: "Konsep Laporan",
-      description: "Data laporan telah dicetak ke konsol browser. Fitur unduh file (PDF/Excel) akan dikembangkan selanjutnya.",
-      duration: 7000,
+    filteredMonitoredCauses.forEach(cause => {
+      const parentPotentialRisk = store.potentialRisks.find(pr => pr.id === cause.potentialRiskId);
+      const grandParentGoal = parentPotentialRisk ? store.goals.find(g => g.id === parentPotentialRisk.goalId) : null;
+      const { level: initialRiskLevelText, score: initialRiskScore } = getCalculatedRiskLevel(cause.likelihood, cause.impact);
+
+      if (cause.controls && cause.controls.length > 0) {
+        cause.controls.forEach(ctrl => {
+          const monitoredCtrlData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
+          const controlCode = `${cause.riskCauseCode}.${ctrl.controlType}.${ctrl.sequenceNumber}`;
+          
+          reportRows.push({
+            "Kode Sasaran": grandParentGoal?.code || "N/A",
+            "Nama Sasaran": grandParentGoal?.name || "N/A",
+            "Kode Potensi Risiko": parentPotentialRisk?.sequenceNumber ? `${grandParentGoal?.code || 'S?'}.PR${parentPotentialRisk.sequenceNumber}` : "N/A",
+            "Deskripsi Potensi Risiko": parentPotentialRisk?.description || "N/A",
+            "Kategori Potensi Risiko": parentPotentialRisk?.category || "N/A",
+            "Pemilik Potensi Risiko": parentPotentialRisk?.owner || "N/A",
+            "Kode Penyebab Risiko": cause.riskCauseCode,
+            "Deskripsi Penyebab Risiko": cause.description,
+            "Sumber Penyebab Risiko": cause.source,
+            "KRI Penyebab Risiko (Awal)": cause.keyRiskIndicator || "N/A",
+            "Toleransi Risiko (Awal)": cause.riskTolerance || "N/A",
+            "Level Kemungkinan Awal (Penyebab)": cause.likelihood || "N/A",
+            "Level Dampak Awal (Penyebab)": cause.impact || "N/A",
+            "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
+            "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
+            "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
+            "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
+            "Kode Pengendalian": controlCode,
+            "Deskripsi Pengendalian": ctrl.description,
+            "Tipe Pengendalian": getControlTypeName(ctrl.controlType),
+            "KCI Pengendalian (Target)": ctrl.keyControlIndicator || "N/A",
+            "Target KCI Pengendalian": ctrl.target || "N/A",
+            "Realisasi KCI Pengendalian (Sesi Ini)": monitoredCtrlData?.realizationKCI || "N/A",
+            "Target Negatif (Pengendalian)": monitoredCtrlData?.isTargetNegative ? "Ya" : "Tidak",
+            "Kinerja Pengendalian (%) (Sesi Ini)": monitoredCtrlData?.controlPerformance ?? "N/A",
+            "Narasi Kegiatan Pengendalian (Sesi Ini)": monitoredCtrlData?.controlActivityNarrative || "N/A",
+            "URL Data Dukung Pengendalian (Sesi Ini)": monitoredCtrlData?.supportingDocumentUrl || "N/A",
+          });
+        });
+      } else {
+        // Row for cause if it has no controls
+        reportRows.push({
+            "Kode Sasaran": grandParentGoal?.code || "N/A",
+            "Nama Sasaran": grandParentGoal?.name || "N/A",
+            "Kode Potensi Risiko": parentPotentialRisk?.sequenceNumber ? `${grandParentGoal?.code || 'S?'}.PR${parentPotentialRisk.sequenceNumber}` : "N/A",
+            "Deskripsi Potensi Risiko": parentPotentialRisk?.description || "N/A",
+            "Kategori Potensi Risiko": parentPotentialRisk?.category || "N/A",
+            "Pemilik Potensi Risiko": parentPotentialRisk?.owner || "N/A",
+            "Kode Penyebab Risiko": cause.riskCauseCode,
+            "Deskripsi Penyebab Risiko": cause.description,
+            "Sumber Penyebab Risiko": cause.source,
+            "KRI Penyebab Risiko (Awal)": cause.keyRiskIndicator || "N/A",
+            "Toleransi Risiko (Awal)": cause.riskTolerance || "N/A",
+            "Level Kemungkinan Awal (Penyebab)": cause.likelihood || "N/A",
+            "Level Dampak Awal (Penyebab)": cause.impact || "N/A",
+            "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
+            "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
+            "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
+            "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
+            "Kode Pengendalian": "N/A",
+            "Deskripsi Pengendalian": "N/A",
+            "Tipe Pengendalian": "N/A",
+            "KCI Pengendalian (Target)": "N/A",
+            "Target KCI Pengendalian": "N/A",
+            "Realisasi KCI Pengendalian (Sesi Ini)": "N/A",
+            "Target Negatif (Pengendalian)": "N/A",
+            "Kinerja Pengendalian (%) (Sesi Ini)": "N/A",
+            "Narasi Kegiatan Pengendalian (Sesi Ini)": "N/A",
+            "URL Data Dukung Pengendalian (Sesi Ini)": "N/A",
+        });
+      }
     });
+
+    const worksheet = XLSX.utils.json_to_sheet(reportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Pemantauan Risiko");
+    
+    // Auto-size columns
+    const cols = Object.keys(reportRows[0] || {}).map(key => ({
+      wch: Math.max(...reportRows.map(row => String(row[key] || "").length), key.length) + 2 // Add some padding
+    }));
+    worksheet["!cols"] = cols;
+    
+    const fileName = `Laporan_Pemantauan_Risiko_${currentSession.name.replace(/\s+/g, '_')}_${format(new Date(), "yyyyMMdd")}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+    toast({ title: "Laporan Diunduh", description: `File ${fileName} telah berhasil diunduh.` });
   };
 
 
@@ -448,8 +466,8 @@ export default function ConductMonitoringPage() {
         description={pageDescription}
         actions={
             <div className="flex space-x-2">
-                <Button variant="outline" onClick={handleDownloadReport} disabled={currentSession.status !== 'Selesai'}>
-                    <FileText className="mr-2 h-4 w-4" /> Unduh Laporan (Konsep)
+                <Button variant="outline" onClick={handleDownloadReport} disabled={currentSession.status !== 'Selesai' && filteredMonitoredCauses.length === 0}>
+                    <FileText className="mr-2 h-4 w-4" /> Unduh Laporan XLSX
                 </Button>
                 <Link href="/monitoring" passHref><Button variant="outline"><ArrowLeft className="mr-2 h-4 w-4" /> Kembali</Button></Link>
             </div>
@@ -515,7 +533,7 @@ export default function ConductMonitoringPage() {
                   </CardDescription>
                 </div>
               </AccordionTrigger>
-              <AccordionContent className={cn("p-4 pt-0", "w-full")}>
+              <AccordionContent className={cn("p-4 pt-0", "w-full")}> {/* Added w-full */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-4">
                     <div className="space-y-3">
                         <div><Label htmlFor={`exposureValue-${cause.id}`}>Realisasi KRI (Nilai Risiko yang Terjadi)</Label><Input id={`exposureValue-${cause.id}`} type="number" placeholder="Nilai numerik risiko yang terjadi" value={exposureValues[cause.id] ?? ''} onChange={(e) => handleExposureValueChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
@@ -543,7 +561,7 @@ export default function ConductMonitoringPage() {
                            );
 
                            return (
-                            <Card key={ctrl.id} className="min-w-[320px] sm:min-w-[360px] lg:w-1/3 flex-shrink-0 shadow-md flex flex-col">
+                            <Card key={ctrl.id} className="flex-shrink-0 shadow-md flex flex-col lg:w-1/3 md:w-1/2 min-w-[300px] sm:min-w-[340px]"> {/* Adjusted width */}
                                 <CardHeader className="pb-3 pt-4 bg-muted/50 dark:bg-slate-800 rounded-t-md min-h-[100px]">
                                     <div className="flex justify-between items-start">
                                         <CardTitle className="text-sm flex items-center">
