@@ -412,7 +412,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error(`Gagal memuat penyebab risiko dari store: ${errorMessage}`);
     }
   },
-  addRiskCauseToStore: async (data, potentialRiskId, goalId, userId, period, sequenceNumber) => {
+  addRiskCauseToStore: async (data, potentialRiskId, goalId, userId, period, sequenceNumber) => { 
      console.log(`[AppStore] Adding risk cause to PotentialRisk: ${potentialRiskId}`);
     try {
       const newRC = await addRiskCauseToService(data, potentialRiskId, goalId, userId, period, sequenceNumber);
@@ -685,8 +685,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       // Placeholder: Replace with actual service call
       // const mcms = await getMonitoredControlMeasuresForSessionAndCause(sessionId, null, userId, period); // null for causeId to get all for session
-      const mcms: MonitoredControlMeasureData[] = []; // Mock empty for now
-      console.log(`[AppStore] Monitored control measures fetched for session ${sessionId}: ${mcms.length}`);
+      // Untuk sekarang, kita asumsikan belum ada service, jadi kembalikan array kosong.
+      // Nanti, ini akan diganti dengan pemanggilan service yang sesungguhnya.
+      const mcms: MonitoredControlMeasureData[] = []; 
+      console.log(`[AppStore] Monitored control measures fetched for session ${sessionId}: ${mcms.length} (mocked)`);
       set(state => ({
         monitoredControlMeasuresData: [
           ...state.monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId !== sessionId),
@@ -698,23 +700,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[AppStore] Error in fetchMonitoredControlMeasuresForSession (Session: ${sessionId}):`, errorMessage);
       set({ monitoredControlMeasuresLoading: false });
-      throw new Error(`Gagal memuat data pemantauan kontrol dari store: ${errorMessage}`);
+      // Sebaiknya tidak melempar error di sini agar UI tidak crash, cukup catat dan lanjutkan.
+      // throw new Error(`Gagal memuat data pemantauan kontrol dari store: ${errorMessage}`);
     }
   },
   upsertMonitoredControlMeasureInState: async (mcmData, userId, period) => {
     console.log(`[AppStore] Upserting monitored control measure data for Control: ${mcmData.controlMeasureId}`);
     try {
-      // Placeholder: Replace with actual service call
-      // const upsertedMCM = await upsertMonitoredControlMeasure(mcmData, userId, period);
+      // Placeholder: Ganti dengan pemanggilan service yang sesungguhnya jika sudah ada.
+      // const upsertedMCMFromService = await upsertMonitoredControlMeasureToService(mcmData, userId, period);
+      
+      // Mockup data jika service belum ada
       const mockId = `${mcmData.monitoringSessionId}_${mcmData.controlMeasureId}`;
+      const existingMCM = get().monitoredControlMeasuresData.find(m => m.id === mockId);
       const upsertedMCM: MonitoredControlMeasureData = {
         ...mcmData,
-        id: get().monitoredControlMeasuresData.find(m => m.id === mockId)?.id || mockId, // Preserve ID if exists
+        id: existingMCM?.id || mockId, 
         userId,
         period,
-        recordedAt: get().monitoredControlMeasuresData.find(m => m.id === mockId)?.recordedAt || new Date().toISOString(),
+        recordedAt: existingMCM?.recordedAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+
       set(state => {
         const index = state.monitoredControlMeasuresData.findIndex(
           m => m.monitoringSessionId === upsertedMCM.monitoringSessionId && m.controlMeasureId === upsertedMCM.controlMeasureId
@@ -744,5 +751,3 @@ export const triggerGlobalDataFetch = (userId: string | null, period: string | n
     store.resetAllData();
   }
 };
-
-    

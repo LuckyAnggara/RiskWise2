@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import type { RiskCause, ControlMeasure, MonitoringSession, RiskExposure, MonitoredRiskCauseView, MonitoringSessionStatus, MonitoredControlMeasureData } from '@/lib/types';
 import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle, UploadCloud } from 'lucide-react';
@@ -30,12 +31,44 @@ const parseToleranceValue = (toleranceText: string | null): number | null => {
     return match ? parseInt(match[1], 10) : null;
 };
 
+// Helper function to parse numeric value from string (e.g., "100%", "Rp 5.000", "5 unit")
+const parseNumericValue = (text: string | null | undefined): number | null => {
+  if (text === null || text === undefined || typeof text !== 'string') return null;
+  const cleanedText = text.replace(/[^0-9.,]/g, '').replace(',', '.'); // Keep numbers, dots, commas; convert comma to dot for float parsing
+  const num = parseFloat(cleanedText);
+  return isNaN(num) ? null : num;
+};
+
+// Helper function to calculate control performance
+const calculateControlPerformance = (
+  realizationKCI: string | null | undefined, 
+  targetKCI: string | null | undefined, 
+  isTargetNegative: boolean | null | undefined
+): number | null => {
+  const realizationValue = parseNumericValue(realizationKCI);
+  const targetValue = parseNumericValue(targetKCI);
+
+  if (realizationValue === null || targetValue === null) return null;
+  if (targetValue === 0) return null; // Avoid division by zero
+
+  let performance: number;
+  if (isTargetNegative) {
+    // Formula B: (2 * Target - Realisasi) / Target * 100%
+    performance = ((2 * targetValue - realizationValue) / targetValue) * 100;
+  } else {
+    // Formula A: (Realisasi / Target) * 100%
+    performance = (realizationValue / targetValue) * 100;
+  }
+  return parseFloat(performance.toFixed(2)); // Return with 2 decimal places
+};
+
+
 interface ControlMonitoringFormState {
   realizationKCI: string;
-  controlEffectivenessNotes: string;
-  controlActivityNotes: string;
+  isTargetNegative: boolean;
+  controlActivityNarrative: string;
   supportingDocumentUrl: string;
-  followUpPlan: string;
+  // controlPerformance is calculated, not stored in form state directly
 }
 
 export default function ConductMonitoringPage() {
@@ -79,7 +112,6 @@ export default function ConductMonitoringPage() {
   const [exposureValues, setExposureValues] = useState<Record<string, string | number>>({});
   const [exposureNotes, setExposureNotes] = useState<Record<string, string>>({});
   
-  // State for control monitoring inputs
   const [controlMonitoringFormValues, setControlMonitoringFormValues] = useState<Record<string, ControlMonitoringFormState>>({});
 
 
@@ -109,11 +141,8 @@ export default function ConductMonitoringPage() {
         if (updatedSession) setCurrentSession(updatedSession);
       }
       
-      // Fetch all necessary data for this session
-      // triggerGlobalDataFetch will ensure goals, PRs, RCs, CMs are loaded if not already for the context
-      // We then need to specifically fetch exposures and monitored CM data for *this* session
       if(useAppStore.getState().dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}` || riskCauses.length === 0){
-          await triggerGlobalDataFetch(currentUserId, currentPeriod); // This will fetch base data including all control measures
+          await triggerGlobalDataFetch(currentUserId, currentPeriod); 
       }
       await fetchRiskExposuresForSession(sessionId, currentUserId, currentPeriod);
       await fetchMonitoredControlMeasuresForSession(sessionId, currentUserId, currentPeriod);
@@ -173,10 +202,9 @@ export default function ConductMonitoringPage() {
           const monitoredCtrlData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
           initialControlFormValues[ctrl.id] = {
             realizationKCI: monitoredCtrlData?.realizationKCI || "",
-            controlEffectivenessNotes: monitoredCtrlData?.controlEffectivenessNotes || "",
-            controlActivityNotes: monitoredCtrlData?.controlActivityNotes || "",
+            isTargetNegative: monitoredCtrlData?.isTargetNegative || false,
+            controlActivityNarrative: monitoredCtrlData?.controlActivityNarrative || "",
             supportingDocumentUrl: monitoredCtrlData?.supportingDocumentUrl || "",
-            followUpPlan: monitoredCtrlData?.followUpPlan || "",
           };
         });
       });
@@ -222,17 +250,17 @@ export default function ConductMonitoringPage() {
     }
   };
   
-  const handleControlMonitoringInputChange = (controlMeasureId: string, field: keyof ControlMonitoringFormState, value: string) => {
+  const handleControlMonitoringInputChange = (controlMeasureId: string, field: keyof ControlMonitoringFormState, value: string | boolean) => {
     setControlMonitoringFormValues(prev => ({
       ...prev,
       [controlMeasureId]: {
-        ...(prev[controlMeasureId] || { realizationKCI: "", controlEffectivenessNotes: "", controlActivityNotes: "", supportingDocumentUrl: "", followUpPlan: "" }),
+        ...(prev[controlMeasureId] || { realizationKCI: "", isTargetNegative: false, controlActivityNarrative: "", supportingDocumentUrl: "" }),
         [field]: value,
       }
     }));
   };
 
-  const handleSaveControlMonitoring = async (controlMeasureId: string, riskCauseId: string) => {
+  const handleSaveControlMonitoring = async (controlMeasureId: string, riskCauseId: string, targetKCI: string | null) => {
     if (!currentSession || !currentUserId || !currentPeriod) {
       toast({ title: "Konteks Tidak Lengkap", variant: "destructive" });
       return;
@@ -244,15 +272,18 @@ export default function ConductMonitoringPage() {
         setControlSavingStates(prev => ({...prev, [controlMeasureId]: false}));
         return;
     }
-    const mcmData = {
+
+    const performance = calculateControlPerformance(formData.realizationKCI, targetKCI, formData.isTargetNegative);
+
+    const mcmData: Omit<MonitoredControlMeasureData, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'> = {
         monitoringSessionId: sessionId,
         riskCauseId: riskCauseId,
         controlMeasureId: controlMeasureId,
         realizationKCI: formData.realizationKCI || null,
-        controlEffectivenessNotes: formData.controlEffectivenessNotes || null,
-        controlActivityNotes: formData.controlActivityNotes || null,
+        isTargetNegative: formData.isTargetNegative,
+        controlPerformance: performance,
+        controlActivityNarrative: formData.controlActivityNarrative || null,
         supportingDocumentUrl: formData.supportingDocumentUrl || null,
-        followUpPlan: formData.followUpPlan || null,
     };
     try {
         await upsertMonitoredControlMeasureInState(mcmData, currentUserId, currentPeriod);
@@ -306,9 +337,9 @@ export default function ConductMonitoringPage() {
         }
       />
       {monitoredCausesWithControls.length === 0 && (
-        <Card><CardContent className="pt-6 text-center"><p className="text-muted-foreground">Tidak ada penyebab risiko untuk dipantau.</p></CardContent></Card>
+        <Card><CardContent className="pt-6 text-center"><p className="text-muted-foreground">Tidak ada penyebab risiko untuk dipantau dalam sesi ini.</p></CardContent></Card>
       )}
-      <div className="space-y-6">
+      <div className="space-y-8">
         { monitoredCausesWithControls.map((cause) => {
           const { level: currentRiskLevelText, score: currentRiskScore } = getCalculatedRiskLevel(cause.likelihood, cause.impact);
           const toleranceValue = parseToleranceValue(cause.riskTolerance);
@@ -319,7 +350,7 @@ export default function ConductMonitoringPage() {
 
           if (exposureValueNum !== null && toleranceValue !== null) {
             const difference = exposureValueNum - toleranceValue;
-            if (difference >= 0) {
+            if (difference >= 0) { // Changed to >= as per typical tolerance logic (value meets or exceeds threshold)
               isExceeded = true;
               comparisonResultText = `Paparan (${exposureValueNum}) >= Toleransi (${toleranceValue}). Hasil: +${difference}. Potensi Risiko Telah Menjadi Risiko Aktual.`;
               guidanceText = "Segera lakukan tindakan pengendalian (Risk Mitigation) dan susun/perbaiki Tindakan Korektif (Corrective Action).";
@@ -330,12 +361,12 @@ export default function ConductMonitoringPage() {
             }
           }
           return (
-            <Card key={cause.id}>
-              <CardHeader>
+            <Card key={cause.id} className="shadow-lg rounded-lg">
+              <CardHeader className="bg-muted/30 rounded-t-lg">
                 <CardTitle className="text-base">{cause.riskCauseCode} - {cause.description}</CardTitle>
                 <CardDescription className="text-xs">Sumber: <Badge variant="outline">{cause.source}</Badge> | Potensi Risiko Induk: {cause.potentialRiskCode} - {cause.potentialRiskDescription}</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6 pt-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div><Label className="font-semibold">Tingkat Risiko Awal</Label><div><Badge className={`${getRiskLevelColor(currentRiskLevelText)}`}>{currentRiskLevelText === 'N/A' ? 'N/A' : `${currentRiskLevelText} (${currentRiskScore ?? 'N/A'})`}</Badge></div></div>
                   <div><Label className="font-semibold">KRI</Label><p className="text-muted-foreground">{cause.keyRiskIndicator || "-"}</p></div>
@@ -354,23 +385,35 @@ export default function ConductMonitoringPage() {
                 <div>
                     <h4 className="text-sm font-semibold mb-3">Pemantauan Pelaksanaan Pengendalian Risiko</h4>
                     {cause.controls.length === 0 ? (<p className="text-xs text-muted-foreground italic">Belum ada rencana pengendalian yang disusun untuk penyebab risiko ini.</p>) :
-                     (<div className="space-y-6">
-                        {cause.controls.map(ctrl => {
+                     (<div className="flex overflow-x-auto space-x-4 pb-2">
+                        {cause.controls.map((ctrl, index) => {
                            const controlCode = `${cause.riskCauseCode}.${ctrl.controlType}.${ctrl.sequenceNumber}`;
-                           const formState = controlMonitoringFormValues[ctrl.id] || { realizationKCI: "", controlEffectivenessNotes: "", controlActivityNotes: "", supportingDocumentUrl: "", followUpPlan: ""};
+                           const formState = controlMonitoringFormValues[ctrl.id] || { realizationKCI: "", isTargetNegative: false, controlActivityNarrative: "", supportingDocumentUrl: ""};
+                           const calculatedPerformance = calculateControlPerformance(formState.realizationKCI, ctrl.target, formState.isTargetNegative);
                            return (
-                            <Card key={ctrl.id} className="bg-muted/30">
-                                <CardHeader className="pb-3 pt-4">
-                                    <CardTitle className="text-sm">{controlCode} - {getControlTypeName(ctrl.controlType)}: {ctrl.description}</CardTitle>
-                                    <CardDescription className="text-xs">Target KCI: {ctrl.target || "-"} | PJ: {ctrl.responsiblePerson || "-"} | Deadline: {ctrl.deadline ? format(parseISO(ctrl.deadline), "dd/MM/yy") : "-"} | Anggaran: Rp{ctrl.budget?.toLocaleString('id-ID') || "0"}</CardDescription>
+                            <Card key={ctrl.id} className="min-w-[320px] sm:min-w-[360px] flex-shrink-0 shadow-md">
+                                <CardHeader className="pb-3 pt-4 bg-slate-50 dark:bg-slate-800/50 rounded-t-md">
+                                    <CardTitle className="text-sm">({index + 1}) {controlCode} - {getControlTypeName(ctrl.controlType)}</CardTitle>
+                                    <CardDescription className="text-xs line-clamp-2" title={ctrl.description}>{ctrl.description}</CardDescription>
                                 </CardHeader>
-                                <CardContent className="space-y-3 text-xs">
-                                    <div><Label htmlFor={`realizationKCI-${ctrl.id}`}>Realisasi KCI</Label><Textarea id={`realizationKCI-${ctrl.id}`} rows={2} placeholder="Catat realisasi KCI..." value={formState.realizationKCI} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'realizationKCI', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} /></div>
-                                    <div><Label htmlFor={`effectivenessNotes-${ctrl.id}`}>Catatan Efektivitas Kontrol</Label><Textarea id={`effectivenessNotes-${ctrl.id}`} rows={2} placeholder="Jelaskan efektivitas kontrol..." value={formState.controlEffectivenessNotes} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'controlEffectivenessNotes', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}/></div>
-                                    <div><Label htmlFor={`activityNotes-${ctrl.id}`}>Catatan Aktivitas Pengendalian</Label><Textarea id={`activityNotes-${ctrl.id}`} rows={2} placeholder="Catat detail pelaksanaan kontrol..." value={formState.controlActivityNotes} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'controlActivityNotes', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}/></div>
-                                    <div><Label htmlFor={`docUrl-${ctrl.id}`}>URL Data Dukung</Label><Input id={`docUrl-${ctrl.id}`} placeholder="https://linkdokumen.com/..." value={formState.supportingDocumentUrl} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'supportingDocumentUrl', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} /></div>
-                                    <div><Label htmlFor={`followUp-${ctrl.id}`}>Rencana Tindak Lanjut</Label><Textarea id={`followUp-${ctrl.id}`} rows={2} placeholder="Jika ada temuan, catat rencana tindak lanjut..." value={formState.followUpPlan} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'followUpPlan', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}/></div>
-                                    <Button size="xs" onClick={() => handleSaveControlMonitoring(ctrl.id, cause.id)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}>{controlSavingStates[ctrl.id] ? <Loader2 className="mr-1 h-3 w-3 animate-spin"/> : <Save className="mr-1 h-3 w-3"/>}Simpan Pemantauan Kontrol</Button>
+                                <CardContent className="space-y-3 text-xs pt-3">
+                                    <div className='text-xs'>
+                                        <p><span className="font-medium">KCI Pengendalian:</span> {ctrl.keyControlIndicator || "-"}</p>
+                                        <p><span className="font-medium">Target KCI:</span> {ctrl.target || "-"}</p>
+                                    </div>
+                                    <Separator/>
+                                    <div><Label htmlFor={`realizationKCI-${ctrl.id}`}>Realisasi KCI</Label><Input id={`realizationKCI-${ctrl.id}`} type="text" placeholder="Realisasi KCI (angka)" value={formState.realizationKCI} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'realizationKCI', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} className="h-8 text-xs" /></div>
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox id={`isTargetNegative-${ctrl.id}`} checked={formState.isTargetNegative} onCheckedChange={(checked) => handleControlMonitoringInputChange(ctrl.id, 'isTargetNegative', Boolean(checked))} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} />
+                                        <Label htmlFor={`isTargetNegative-${ctrl.id}`} className="text-xs font-normal">Target Negatif (makin rendah realisasi, makin baik)</Label>
+                                    </div>
+                                    <div>
+                                        <Label>Kinerja Pengendalian Risiko (%)</Label>
+                                        <Input readOnly value={calculatedPerformance !== null ? `${calculatedPerformance}%` : "N/A"} className="h-8 text-xs bg-muted/50" />
+                                    </div>
+                                    <div><Label htmlFor={`narrative-${ctrl.id}`}>Keterangan Kegiatan Pengendalian</Label><Textarea id={`narrative-${ctrl.id}`} rows={2} placeholder="Narasi singkat kegiatan pengendalian..." value={formState.controlActivityNarrative} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'controlActivityNarrative', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}/></div>
+                                    <div><Label htmlFor={`docUrl-${ctrl.id}`}>URL Data Dukung</Label><Input id={`docUrl-${ctrl.id}`} placeholder="https://linkdokumen.com/..." value={formState.supportingDocumentUrl} onChange={e => handleControlMonitoringInputChange(ctrl.id, 'supportingDocumentUrl', e.target.value)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} className="h-8 text-xs"/></div>
+                                    <Button size="xs" onClick={() => handleSaveControlMonitoring(ctrl.id, cause.id, ctrl.target)} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'}>{controlSavingStates[ctrl.id] ? <Loader2 className="mr-1 h-3 w-3 animate-spin"/> : <Save className="mr-1 h-3 w-3"/>}Simpan Monitor Kontrol</Button>
                                 </CardContent>
                             </Card>
                            );
@@ -391,5 +434,3 @@ export default function ConductMonitoringPage() {
     </div>
   );
 }
-
-    

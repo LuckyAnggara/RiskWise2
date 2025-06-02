@@ -152,6 +152,8 @@ export interface RiskCause {
   impact: ImpactLevelDesc | null;
   createdAt: string; 
   analysisUpdatedAt?: string; 
+  potentialRiskCode?: string; // Added for display in monitoring
+  riskCauseCode?: string; // Added for display in monitoring
 }
 
 export interface ControlMeasure {
@@ -185,7 +187,7 @@ export interface AppUser {
   uprId: string | null; 
   activePeriod: string | null;
   availablePeriods: string[] | null;
-  riskAppetite?: number | null; // Added Optional Risk Appetite
+  riskAppetite?: number | null; 
   monitoringSettings?: {
     defaultFrequency?: MonitoringPeriodFrequency | null;
   } | null;
@@ -237,19 +239,17 @@ export interface MonitoredRiskCauseView extends RiskCause {
 }
 
 export interface MonitoredControlMeasureData {
-  id: string; // Unique ID for this monitoring record, can be controlMeasureId + monitoringSessionId
+  id: string; 
   monitoringSessionId: string; 
-  riskCauseId: string; // Parent RiskCause
-  controlMeasureId: string; // The ControlMeasure being monitored
+  riskCauseId: string; 
+  controlMeasureId: string; 
   userId: string;
-  period: string; // Application period when this record was made
+  period: string; 
   realizationKCI: string | null;
-  controlEffectivenessNotes: string | null; // Changed from performance
-  controlActivityNotes: string | null;
+  isTargetNegative: boolean | null;
+  controlPerformance: number | null;
+  controlActivityNarrative: string | null;
   supportingDocumentUrl: string | null; 
-  followUpPlan: string | null;
   recordedAt: string; 
   updatedAt?: string; 
 }
-
-    
