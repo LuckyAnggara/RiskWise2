@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Loader2, ArrowLeft, AlertTriangle, BarChart2, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
-import type { MonitoringSession, RiskCause, PotentialRisk, Goal, RiskExposure, MonitoredControlMeasureData, ControlMeasure } from '@/lib/types'; // Added ControlMeasure
+import type { MonitoringSession, RiskCause, PotentialRisk, Goal, RiskExposure, MonitoredControlMeasureData, ControlMeasure } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
@@ -53,159 +53,208 @@ export default function ComparativeAnalysisPage() {
   const [selectedSessionsDetails, setSelectedSessionsDetails] = useState<MonitoringSession[]>([]);
   const [comparativeData, setComparativeData] = useState<RiskCauseComparativeSummary[]>([]);
   
-  const [sessionsDetailLoading, setSessionsDetailLoading] = useState(true);
-  const [dependentDataLoading, setDependentDataLoading] = useState(true);
-  const [processingComparativeData, setProcessingComparativeData] = useState(true);
+  // Granular loading states
+  const [sessionsDetailLoadingState, setSessionsDetailLoadingState] = useState(true); // For E2
+  const [dependentDataLoadingState, setDependentDataLoadingState] = useState(true); // For E3
+  const [processingComparativeDataState, setProcessingComparativeDataState] = useState(true); // For E4
   
   const isLoadingPage = useMemo(() => 
-    authLoading || sessionsDetailLoading || dependentDataLoading || processingComparativeData || 
-    store.goalsLoading || store.potentialRisksLoading || store.riskCausesLoading || store.controlMeasuresLoading ||
-    store.riskExposuresLoading || store.monitoredControlMeasuresLoading, // Ditambahkan
-    [
-      authLoading, sessionsDetailLoading, dependentDataLoading, processingComparativeData, 
-      store.goalsLoading, store.potentialRisksLoading, store.riskCausesLoading, store.controlMeasuresLoading,
-      store.riskExposuresLoading, store.monitoredControlMeasuresLoading // Ditambahkan
-    ]
+    authLoading || sessionsDetailLoadingState || dependentDataLoadingState || processingComparativeDataState,
+    [authLoading, sessionsDetailLoadingState, dependentDataLoadingState, processingComparativeDataState]
   );
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
 
-  // Efek 1: Mengambil dan mengatur selectedSessionIds dari URL
+  // Effect 1: Get selectedSessionIds from URL
   useEffect(() => {
+    console.log("[AnalysisPage E1] Running.");
     const idsQueryParam = searchParams.get('sessionIds');
-    console.log("[AnalysisPage E1] sessionIds from URL:", idsQueryParam);
     if (idsQueryParam) {
       const ids = idsQueryParam.split(',').filter(id => id.trim() !== '');
       if (ids.length > 0) {
         setSelectedSessionIds(ids);
-      } else if (!authLoading && !isLoadingPage) { // Cek loading untuk mencegah redirect prematur
+      } else if (!authLoading) { 
         toast({ title: "Error", description: "Tidak ada sesi yang valid dipilih untuk analisis.", variant: "destructive" });
         router.push('/comparative-monitoring');
       }
-    } else if (!authLoading && !isLoadingPage) {
+    } else if (!authLoading) {
       toast({ title: "Error", description: "Parameter ID Sesi hilang.", variant: "destructive" });
       router.push('/comparative-monitoring');
     }
-  }, [searchParams, router, toast, authLoading, isLoadingPage]); // isLoadingPage ditambahkan
+  }, [searchParams, router, toast, authLoading]);
 
-  // Efek 2: Memuat detail sesi pemantauan berdasarkan selectedSessionIds
+  // Effect 2: Load base details for selected monitoring sessions
   useEffect(() => {
     let isActive = true;
     const loadSessionDetails = async () => {
+      console.log("[AnalysisPage E2] Running. Deps:", {selectedSessionIdsLength: selectedSessionIds.length, currentUserId, currentPeriod, isProfileComplete, monitoringSessionsLoading: store.monitoringSessionsLoading});
       if (selectedSessionIds.length === 0 || !currentUserId || !currentPeriod || !isProfileComplete) {
         if (isActive) {
-          setSessionsDetailLoading(false);
+          setSessionsDetailLoadingState(false);
           setSelectedSessionsDetails([]);
         }
         return;
       }
-      console.log("[AnalysisPage E2] Loading session details for IDs:", selectedSessionIds);
-      if(isActive) setSessionsDetailLoading(true);
+      if(isActive) setSessionsDetailLoadingState(true);
+      
+      // Wait if monitoring sessions are still loading globally
+      if (store.monitoringSessionsLoading) {
+        console.log("[AnalysisPage E2] Waiting for global monitoring sessions to load.");
+        // setSessionsDetailLoadingState(true) is already called. Return and wait for re-run.
+        return;
+      }
+
       try {
-        // Ambil dari store, jika tidak ada, bisa panggil service (tapi store harusnya sudah diisi oleh triggerGlobalDataFetch)
-        const allSessionsFromStore = store.monitoringSessions; 
+        const allSessionsFromStore = store.monitoringSessions;
+        if (allSessionsFromStore.length === 0) {
+          console.warn("[AnalysisPage E2] Monitoring sessions in store are empty even after loading finished. This might indicate no sessions for the user/period.");
+           if (isActive) {
+            setSelectedSessionsDetails([]);
+            setSessionsDetailLoadingState(false);
+           }
+          return;
+        }
+
         const details = selectedSessionIds
           .map(id => allSessionsFromStore.find(s => s.id === id && s.userId === currentUserId && s.period === currentPeriod))
           .filter(s => s !== undefined) as MonitoringSession[];
         
         if (isActive) {
           if (details.length !== selectedSessionIds.length) {
-            console.warn("[AnalysisPage E2] Not all selected sessions found in current store state or context mismatch.");
+            console.warn("[AnalysisPage E2] Not all selected sessions found or context mismatch.");
           }
           const sortedDetails = details.sort((a,b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime());
           setSelectedSessionsDetails(sortedDetails);
           console.log("[AnalysisPage E2] Session details set (count):", sortedDetails.length);
-          setSessionsDetailLoading(false);
+          setSessionsDetailLoadingState(false);
         }
       } catch (error) {
         if (isActive) {
           console.error("[AnalysisPage E2] Error loading session details:", error);
           toast({ title: "Gagal Memuat Detail Sesi", description: String(error), variant: "destructive" });
-          setSessionsDetailLoading(false);
+          setSessionsDetailLoadingState(false);
         }
       }
     };
     loadSessionDetails();
     return () => { isActive = false };
-  }, [selectedSessionIds, currentUserId, currentPeriod, isProfileComplete, toast, store.monitoringSessions]);
+  }, [selectedSessionIds, currentUserId, currentPeriod, isProfileComplete, toast, store.monitoringSessions, store.monitoringSessionsLoading]);
 
 
-  // Efek 3: Memuat data dependen (RiskExposures, MonitoredControlMeasureData) untuk sesi yang dipilih
+  // Effect 3: Fetch dependent data (RiskExposures, MonitoredControlMeasures)
   useEffect(() => {
     let isActive = true;
     const fetchAllDependentData = async () => {
-      if (selectedSessionsDetails.length === 0 || !currentUserId || !currentPeriod || sessionsDetailLoading) {
-        if (isActive && !sessionsDetailLoading) setDependentDataLoading(false);
+      console.log("[AnalysisPage E3] Running. Deps:", {selectedSessionsDetailsLength: selectedSessionsDetails.length, sessionsDetailLoadingState});
+      if (selectedSessionsDetails.length === 0 || !currentUserId || !currentPeriod || sessionsDetailLoadingState) {
+        if (isActive && !sessionsDetailLoadingState) setDependentDataLoadingState(false);
         return;
       }
-      console.log("[AnalysisPage E3] Fetching dependent data for sessions (count):", selectedSessionsDetails.length);
-      if(isActive) setDependentDataLoading(true);
+      if(isActive) setDependentDataLoadingState(true);
+      
       try {
-        // Pastikan data global (goals, potentialRisks, riskCauses, controlMeasures) sudah atau sedang dimuat oleh triggerGlobalDataFetch
-        // Kita hanya perlu fetch data spesifik sesi di sini.
+        // Global data (goals, PRs, RCs, CMs) should be fetched by AppLayout/useAppStore's setAppContext
+        // We check if it's done before proceeding to aggregation, but fetching session specifics can happen in parallel.
         if (store.dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
-          console.log("[AnalysisPage E3] Global data not yet fetched for current context. Waiting for AppLayout's triggerGlobalDataFetch.");
-          // Ini bisa terjadi jika user langsung ke halaman ini. AppLayout akan handle global fetch.
-          // Kita tidak set dependentDataLoading ke false di sini, biarkan efek lain yang handle
-          return;
+          console.log("[AnalysisPage E3] Global data (goals, etc.) not yet marked as fetched for current context. Fetching session specifics anyway, aggregation will wait.");
         }
 
         const fetchPromises = selectedSessionsDetails.flatMap(session => [
           store.fetchRiskExposuresForSession(session.id, currentUserId, currentPeriod),
           store.fetchMonitoredControlMeasuresForSession(session.id, currentUserId, currentPeriod)
         ]);
+        
         await Promise.all(fetchPromises);
+        
         if (isActive) {
-          console.log("[AnalysisPage E3] All dependent data fetch initiated.");
-          setDependentDataLoading(false); // Set false karena fetch telah selesai dipicu.
+          console.log("[AnalysisPage E3] All dependent data fetch initiated/completed.");
+          setDependentDataLoadingState(false); 
         }
       } catch (error) {
         if (isActive) {
           console.error("[AnalysisPage E3] Error initiating dependent data fetch:", error);
-          toast({ title: "Gagal Memuat Data Pemantauan Detail", description: String(error), variant: "destructive" });
-          setDependentDataLoading(false);
+          toast({ title: "Gagal Memuat Data Detail Pemantauan", description: String(error), variant: "destructive" });
+          setDependentDataLoadingState(false);
         }
       }
     };
     fetchAllDependentData();
     return () => { isActive = false };
-  }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoading, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast, store.dataFetchedForPeriod]);
+  }, [selectedSessionsDetails, currentUserId, currentPeriod, sessionsDetailLoadingState, store.fetchRiskExposuresForSession, store.fetchMonitoredControlMeasuresForSession, toast, store.dataFetchedForPeriod]);
 
 
-  // Efek 4: Agregasi data komparatif
+  // Effect 4: Aggregate comparative data
   useEffect(() => {
     let isActive = true;
+    
     const aggregateComparativeData = async () => {
       console.log("[AnalysisPage E4] Attempting to aggregate comparative data.");
-      if (isActive) setProcessingComparativeData(true);
+      if(isActive) setProcessingComparativeDataState(true);
 
-      const currentRiskExposures = store.riskExposures;
-      const currentMonitoredControls = store.monitoredControlMeasuresData;
-      const currentControlMeasures = store.controlMeasures;
-      const currentRiskCauses = store.riskCauses;
-      const currentPotentialRisks = store.potentialRisks;
-      const currentGoals = store.goals;
+      // Data from store, ensure they are stable references if not changing.
+      const {
+        riskExposures, monitoredControlMeasuresData, controlMeasures,
+        riskCauses, potentialRisks, goals,
+        riskExposuresLoading, monitoredControlMeasuresLoading, controlMeasuresLoading,
+        riskCausesLoading, potentialRisksLoading, goalsLoading
+      } = store;
+
+      const allDataReady = 
+        !authLoading && isProfileComplete && currentUserId && currentPeriod &&
+        selectedSessionsDetails.length > 0 && 
+        !sessionsDetailLoadingState && 
+        !dependentDataLoadingState &&
+        !riskExposuresLoading && !monitoredControlMeasuresLoading &&
+        !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading;
+
+      console.log("[AnalysisPage E4] Prerequisites check for aggregation. AllDataReady:", allDataReady, "Details:", {
+          authLoading, isProfileComplete, currentUserIdPresent: !!currentUserId, currentPeriodPresent: !!currentPeriod,
+          selectedSessionsDetailsLength: selectedSessionsDetails.length,
+          sessionsDetailLoadingState, dependentDataLoadingState,
+          riskExposuresLoading, monitoredControlMeasuresLoading,
+          goalsLoading, potentialRisksLoading, riskCausesLoading, controlMeasuresLoading,
+      });
+      
+      if (!allDataReady) {
+        if(isActive) {
+          // If any loading is still true, keep processing state true.
+          // If all loadings are false but selectedSessionsDetails is empty or other core data is missing,
+          // it implies an issue in earlier steps or no data to process.
+           if (!authLoading && !sessionsDetailLoadingState && !dependentDataLoadingState &&
+               !riskExposuresLoading && !monitoredControlMeasuresLoading &&
+               !goalsLoading && !potentialRisksLoading && !riskCausesLoading && !controlMeasuresLoading &&
+               selectedSessionsDetails.length === 0
+             ) {
+                console.log("[AnalysisPage E4] All loading complete, but no session details to process. Stopping processing.");
+                setProcessingComparativeDataState(false);
+                setComparativeData([]); // Ensure data is cleared if no sessions
+           } else {
+                console.log("[AnalysisPage E4] Prerequisites not met or data still loading. Skipping aggregation for now.");
+           }
+        }
+        return;
+      }
       
       const allRiskCauseIdsAcrossSessions = new Set<string>();
       selectedSessionsDetails.forEach(s => s.riskCauseIdsToMonitor.forEach(rcId => allRiskCauseIdsAcrossSessions.add(rcId)));
 
       const aggregatedDataPromises = Array.from(allRiskCauseIdsAcrossSessions).map(async rcId => {
-        const riskCause = currentRiskCauses.find(rc => rc.id === rcId && rc.userId === currentUserId && rc.period === currentPeriod);
+        const riskCause = riskCauses.find(rc => rc.id === rcId && rc.userId === currentUserId && rc.period === currentPeriod);
         if (!riskCause) return null;
 
-        const potentialRisk = currentPotentialRisks.find(pr => pr.id === riskCause.potentialRiskId && pr.userId === currentUserId && pr.period === currentPeriod);
-        const goal = potentialRisk ? currentGoals.find(g => g.id === potentialRisk.goalId && g.userId === currentUserId && g.period === currentPeriod) : null;
+        const potentialRisk = potentialRisks.find(pr => pr.id === riskCause.potentialRiskId && pr.userId === currentUserId && pr.period === currentPeriod);
+        const goal = potentialRisk ? goals.find(g => g.id === potentialRisk.goalId && g.userId === currentUserId && g.period === currentPeriod) : null;
 
         const dataPoints: ComparativeDataPoint[] = [];
         for (const session of selectedSessionsDetails) {
           if (!session.riskCauseIdsToMonitor.includes(rcId)) continue;
 
-          const exposure = currentRiskExposures.find(re => re.monitoringSessionId === session.id && re.riskCauseId === rcId && re.userId === currentUserId && re.period === currentPeriod);
-          const controlsDataForSessionAndCause = currentMonitoredControls.filter(mcmd => mcmd.monitoringSessionId === session.id && mcmd.riskCauseId === rcId && mcmd.userId === currentUserId && mcmd.period === currentPeriod);
+          const exposure = riskExposures.find(re => re.monitoringSessionId === session.id && re.riskCauseId === rcId && re.userId === currentUserId && re.period === currentPeriod);
+          const controlsDataForSessionAndCause = monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId === session.id && mcmd.riskCauseId === rcId && mcmd.userId === currentUserId && mcmd.period === currentPeriod);
           
           const controlPerformances = controlsDataForSessionAndCause.map(mcmd => {
-              const controlDetail = currentControlMeasures.find(cm => cm.id === mcmd.controlMeasureId && cm.userId === currentUserId && cm.period === currentPeriod);
+              const controlDetail = controlMeasures.find(cm => cm.id === mcmd.controlMeasureId && cm.userId === currentUserId && cm.period === currentPeriod);
               return {
                   controlId: mcmd.controlMeasureId,
                   controlDesc: controlDetail?.description || "Pengendalian tidak ditemukan",
@@ -248,58 +297,22 @@ export default function ComparativeAnalysisPage() {
           toast({ title: "Gagal Memproses Data Komparatif", description: String(error), variant: "destructive" });
         }
       } finally {
-        if (isActive) setProcessingComparativeData(false);
+        if (isActive) setProcessingComparativeDataState(false);
       }
     };
     
-    const prerequisitesMet = 
-      !authLoading && isProfileComplete && currentUserId && currentPeriod &&
-      selectedSessionsDetails.length > 0 && 
-      !sessionsDetailLoading && 
-      !dependentDataLoading &&
-      !store.riskExposuresLoading && 
-      !store.monitoredControlMeasuresLoading &&
-      !store.goalsLoading && 
-      !store.potentialRisksLoading && 
-      !store.riskCausesLoading && 
-      !store.controlMeasuresLoading;
+    aggregateComparativeData();
 
-    console.log("[AnalysisPage E4] Prerequisites for aggregation:", {
-        authLoading, isProfileComplete, currentUserId, currentPeriod,
-        selectedSessionsDetailsLength: selectedSessionsDetails.length,
-        sessionsDetailLoading, dependentDataLoading,
-        riskExposuresLoading: store.riskExposuresLoading,
-        monitoredControlMeasuresLoading: store.monitoredControlMeasuresLoading,
-        goalsLoading: store.goalsLoading, potentialRisksLoading: store.potentialRisksLoading, 
-        riskCausesLoading: store.riskCausesLoading, controlMeasuresLoading: store.controlMeasuresLoading,
-        allPrerequisitesMet: prerequisitesMet
-    });
-
-    if (prerequisitesMet) {
-      aggregateComparativeData();
-    } else {
-      if (isActive && !authLoading && !sessionsDetailLoading && !dependentDataLoading) {
-        // If main page loadings are done but store loadings might still be pending,
-        // keep processingComparativeData true until store loadings are also false.
-        // If all loadings (page and store specific) are false and selectedSessionsDetails is empty, then processing can be false.
-        if (selectedSessionsDetails.length === 0 && 
-            !store.riskExposuresLoading && !store.monitoredControlMeasuresLoading &&
-            !store.goalsLoading && !store.potentialRisksLoading && 
-            !store.riskCausesLoading && !store.controlMeasuresLoading) {
-            setProcessingComparativeData(false);
-        }
-      }
-    }
     return () => {isActive = false;};
   }, [
-    // Page specific state
-    selectedSessionsDetails, sessionsDetailLoading, dependentDataLoading,
+    // Page specific state, ensure these don't cause loops if their references change unnecessarily
+    selectedSessionsDetails, sessionsDetailLoadingState, dependentDataLoadingState,
     // Auth context
     authLoading, isProfileComplete, currentUserId, currentPeriod,
-    // Store data arrays (trigger re-run if these actual data arrays change)
+    // Store data arrays (for their content changes) - these ARE expected to change and re-trigger
     store.riskExposures, store.monitoredControlMeasuresData,
     store.controlMeasures, store.riskCauses, store.potentialRisks, store.goals,
-    // Store loading flags (trigger re-run if loading state changes)
+    // Store loading flags (for their state changes) - these also trigger re-runs until false
     store.riskExposuresLoading, store.monitoredControlMeasuresLoading,
     store.goalsLoading, store.potentialRisksLoading,
     store.riskCausesLoading, store.controlMeasuresLoading,
@@ -327,7 +340,7 @@ export default function ComparativeAnalysisPage() {
     )
   }
   
-  if (selectedSessionIds.length === 0 && !isLoadingPage) {
+  if (selectedSessionIds.length === 0 && !isLoadingPage) { // Checked after isLoadingPage
     return (
          <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -369,7 +382,7 @@ export default function ComparativeAnalysisPage() {
         </CardContent>
       </Card>
       
-      {comparativeData.length === 0 && !isLoadingPage && (
+      {comparativeData.length === 0 && !isLoadingPage && selectedSessionsDetails.length > 0 && ( // Only show this if sessions were selected but no data
         <Card>
           <CardContent className="pt-6 text-center">
             <AlertTriangle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
@@ -445,6 +458,4 @@ export default function ComparativeAnalysisPage() {
     </div>
   );
 }
-
-
-    
+        
