@@ -4,8 +4,7 @@
 import React from 'react';
 import { Badge } from "@/components/ui/badge";
 import type { RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from '@/lib/types';
-import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types'; // Corrected import
-import { getRiskLevelColor, getCalculatedRiskLevel } from '@/app/risk-cause-analysis/[riskCauseId]/page';
+import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, getCalculatedRiskLevel, getRiskLevelColor } from '@/lib/types'; // Corrected import
 
 interface RiskPriorityMatrixProps {
   riskCauses: Array<RiskCause & { riskScore?: number | null; riskLevelText?: string }>;
@@ -96,3 +95,4 @@ export function RiskPriorityMatrix({ riskCauses }: RiskPriorityMatrixProps) {
     </div>
   );
 }
+

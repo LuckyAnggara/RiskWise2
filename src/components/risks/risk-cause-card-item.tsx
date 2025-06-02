@@ -1,12 +1,12 @@
 
 "use client";
 
-import type { RiskCause, LikelihoodLevelDesc, ImpactLevelDesc } from '@/lib/types';
+import type { RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory } from '@/lib/types';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"; 
 import { Settings2, BarChart3, Trash2 } from 'lucide-react';
-import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, type CalculatedRiskLevelCategory } from '@/lib/types';
+import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, getCalculatedRiskLevel, getRiskLevelColor } from '@/lib/types'; // Corrected import
 import Link from 'next/link';
 import {
   DropdownMenu,
@@ -21,40 +21,8 @@ interface RiskCauseCardItemProps {
   onAnalyze: (causeId: string) => void;
   onDelete: (causeId: string) => void;
   returnPath: string;
-  canDelete: boolean; // Added to control delete button state
+  canDelete: boolean; 
 }
-
-const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, impact: ImpactLevelDesc | null): { level: CalculatedRiskLevelCategory | 'N/A'; score: number | null } => {
-  if (!likelihood || !impact) return { level: 'N/A', score: null };
-  
-  const likelihoodValue = LIKELIHOOD_LEVELS_DESC_MAP[likelihood];
-  const impactValue = IMPACT_LEVELS_DESC_MAP[impact];
-
-  if (likelihoodValue === undefined || impactValue === undefined) return { level: 'N/A', score: null };
-
-  const score = likelihoodValue * impactValue;
-
-  let level: CalculatedRiskLevelCategory;
-  if (score >= 20) level = 'Sangat Tinggi';
-  else if (score >= 16) level = 'Tinggi';
-  else if (score >= 12) level = 'Sedang';
-  else if (score >= 6) level = 'Rendah';
-  else if (score >= 1) level = 'Sangat Rendah';
-  else level = 'Sangat Rendah'; 
-
-  return { level, score };
-};
-
-const getRiskLevelColor = (level: CalculatedRiskLevelCategory | 'N/A') => {
-  switch (level?.toLowerCase()) {
-    case 'sangat tinggi': return 'bg-red-600 hover:bg-red-700 text-white';
-    case 'tinggi': return 'bg-orange-500 hover:bg-orange-600 text-white';
-    case 'sedang': return 'bg-yellow-400 hover:bg-yellow-500 text-black dark:bg-yellow-500 dark:text-black';
-    case 'rendah': return 'bg-blue-500 hover:bg-blue-600 text-white'; 
-    case 'sangat rendah': return 'bg-green-500 hover:bg-green-600 text-white';
-    default: return 'bg-gray-400 hover:bg-gray-500 text-white';
-  }
-};
 
 export function RiskCauseCardItem({ riskCause, potentialRiskFullCode, onAnalyze, onDelete, returnPath, canDelete }: RiskCauseCardItemProps) {
   const causeCode = `${potentialRiskFullCode}.PC${riskCause.sequenceNumber || '?'}`;
@@ -129,3 +97,4 @@ export function RiskCauseCardItem({ riskCause, potentialRiskFullCode, onAnalyze,
     </Card>
   );
 }
+

@@ -111,9 +111,8 @@ export default function RiskCauseAnalysisPage() {
   const returnPathForButton = useMemo(() => {
     const fromQuery = searchParams.get('from');
     if (fromQuery) return fromQuery;
-    // PotentialRisk ID might not be available immediately if parentPotentialRisk is null initially
     if (parentPotentialRisk?.id) return `/all-risks/manage/${parentPotentialRisk.id}`;
-    return '/risk-analysis'; // Default fallback
+    return '/risk-analysis'; 
   }, [searchParams, parentPotentialRisk?.id]);
 
 
@@ -143,103 +142,60 @@ export default function RiskCauseAnalysisPage() {
   
   useEffect(() => {
     let isActive = true;
-    let isDataLoadingOperation = false; // Flag to prevent re-entrant calls within the same tick
+    let isDataLoadingOperation = false; 
 
     async function loadPageDataInternal() {
       if (!isActive || isDataLoadingOperation || !currentUserId || !currentPeriod || !riskCauseId) {
-        if (!isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing (inactive).");
-        else if (isDataLoadingOperation) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing (already in progress).");
-        else console.warn("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing (missing critical IDs).", { currentUserId, currentPeriod, riskCauseId });
-        
-        if(isActive && !isDataLoadingOperation) setLocalPageDataLoading(false); // Ensure loading stops if bailing due to missing IDs
+        if(isActive && !isDataLoadingOperation) setLocalPageDataLoading(false); 
         return;
       }
       
-      console.log(`[RiskCauseAnalysisPage] loadPageDataInternal: Fetching data for RC_ID: ${riskCauseId}, User: ${currentUserId}, Period: ${currentPeriod}`);
       isDataLoadingOperation = true;
       if(isActive) setLocalPageDataLoading(true);
       
       try {
         const foundCause = await store.getRiskCauseById(riskCauseId, currentUserId, currentPeriod);
-        if (!isActive || !foundCause) {
-            if(!isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing after getRiskCauseById (inactive).");
-            else console.warn(`[RiskCauseAnalysisPage] loadPageDataInternal: RiskCause (ID: ${riskCauseId}) not found or context mismatch.`);
-            throw new Error(!foundCause ? `Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan.` : 'Operasi dibatalkan.');
-        }
+        if (!isActive || !foundCause) throw new Error(!foundCause ? `Penyebab Risiko (ID: ${riskCauseId}) tidak ditemukan.` : 'Operasi dibatalkan.');
         if (isActive) setCurrentRiskCause(foundCause);
 
         const foundPotentialRisk = await store.getPotentialRiskById(foundCause.potentialRiskId, currentUserId, currentPeriod);
-        if (!isActive || !foundPotentialRisk) {
-            if(!isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing after getPotentialRiskById (inactive).");
-            else console.warn(`[RiskCauseAnalysisPage] loadPageDataInternal: PotentialRisk (ID: ${foundCause.potentialRiskId}) not found.`);
-            throw new Error(!foundPotentialRisk ? `Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan.` : 'Operasi dibatalkan.');
-        }
+        if (!isActive || !foundPotentialRisk) throw new Error(!foundPotentialRisk ? `Potensi risiko induk (ID: ${foundCause.potentialRiskId}) tidak ditemukan.` : 'Operasi dibatalkan.');
          if (isActive) setParentPotentialRisk(foundPotentialRisk);
 
         const foundGoal = await store.getGoalById(foundPotentialRisk.goalId, currentUserId, currentPeriod);
-        if (!isActive || !foundGoal) {
-            if(!isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Bailing after getGoalById (inactive).");
-            else console.warn(`[RiskCauseAnalysisPage] loadPageDataInternal: Goal (ID: ${foundPotentialRisk.goalId}) not found.`);
-            throw new Error(!foundGoal ? `Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan.` : 'Operasi dibatalkan.');
-        }
+        if (!isActive || !foundGoal) throw new Error(!foundGoal ? `Sasaran induk (ID: ${foundPotentialRisk.goalId}) tidak ditemukan.` : 'Operasi dibatalkan.');
         if (isActive) setGrandParentGoal(foundGoal);
         
-        if (foundCause && isActive) { // Check isActive again before async operation
-            console.log("[RiskCauseAnalysisPage] loadPageDataInternal: About to fetch control measures.");
+        if (foundCause && isActive) { 
             await store.fetchControlMeasures(currentUserId, currentPeriod, foundCause.id);
-            if(isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Control measures fetch complete (or skipped if no cause).");
         }
-         if(isActive) console.log("[RiskCauseAnalysisPage] loadPageDataInternal: MAIN DATA LOADED (Cause, PR, Goal, Controls).");
 
       } catch (error: any) {
-        if (!isActive) {
-            console.log("[RiskCauseAnalysisPage] loadPageDataInternal: Error caught, but component inactive.", error?.message || String(error));
-            return;
-        }
-        // Check for specific AbortError or similar if you implement cancellation tokens
+        if (!isActive) return;
         const errorMessage = (error instanceof Error && error.message) ? error.message : String(error).substring(0,500);
-        console.error("[RiskCauseAnalysisPage] Error in loadPageDataInternal:", errorMessage);
         if(isActive) {
             toast({ title: "Kesalahan Memuat Data Detail", description: errorMessage, variant: "destructive" });
             router.push(returnPathForButton); 
         }
       } finally {
-        if (isActive) {
-          setLocalPageDataLoading(false);
-          console.log("[RiskCauseAnalysisPage] loadPageDataInternal: FINISHED, localPageDataLoading set to false.");
-        }
+        if (isActive) setLocalPageDataLoading(false);
         isDataLoadingOperation = false;
       }
     }
     
-    console.log(`[RiskCauseAnalysisPage] Effect for main data fetch TRIGGERED. RC_ID: ${riskCauseId}, UserID: ${currentUserId}, Period: ${currentPeriod}, ProfileComplete: ${isProfileComplete}, ContextOverallLoading: ${contextOverallLoading}, ContextProfileLoading: ${contextProfileLoading}`);
-
     if (currentUserId && currentPeriod && isProfileComplete && !contextOverallLoading && !contextProfileLoading && riskCauseId) {
         loadPageDataInternal();
     } else if (!contextOverallLoading && !contextProfileLoading && isActive) { 
         if (localPageDataLoading) setLocalPageDataLoading(false); 
-        console.log("[RiskCauseAnalysisPage] Effect for main data fetch: Conditions not met for load, ensuring loading state is false if active.");
-    } else {
-        console.log("[RiskCauseAnalysisPage] Effect for main data fetch: Conditions not met (e.g. context loading or missing IDs).");
     }
-
-    return () => { 
-      isActive = false; 
-      console.log("[RiskCauseAnalysisPage] useEffect for main data fetch: CLEANUP.");
-    };
+    return () => { isActive = false; };
   }, [
-    riskCauseId, 
-    currentUserId, 
-    currentPeriod, 
-    isProfileComplete, 
-    contextOverallLoading, 
-    contextProfileLoading
-    // store, router, toast, returnPathForButton are stable and removed from deps
+    riskCauseId, currentUserId, currentPeriod, isProfileComplete, contextOverallLoading, contextProfileLoading
+    // Stable dependencies like store, router, toast, returnPathForButton removed
   ]);
 
   useEffect(() => {
     if (currentRiskCause) {
-      console.log("[RiskCauseAnalysisPage] currentRiskCause updated, resetting form with:", currentRiskCause);
       reset({
         keyRiskIndicator: currentRiskCause.keyRiskIndicator || "",
         riskTolerance: currentRiskCause.riskTolerance || "",
@@ -249,7 +205,6 @@ export default function RiskCauseAnalysisPage() {
       setAiLikelihoodImpactSuggestion(null); 
       setAiKriToleranceSuggestions(null);
     } else {
-       console.log("[RiskCauseAnalysisPage] currentRiskCause is null, resetting form to defaults.");
        reset({ keyRiskIndicator: null, riskTolerance: null, likelihood: null, impact: null });
     }
   }, [currentRiskCause, reset]);
@@ -789,4 +744,5 @@ export default function RiskCauseAnalysisPage() {
     </div>
   );
 }
+
 

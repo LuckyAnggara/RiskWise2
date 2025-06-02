@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,13 +11,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loader2, BarChart3, Settings2, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 import type { Goal, PotentialRisk, RiskCause, LikelihoodLevelDesc, ImpactLevelDesc, RiskCategory, CalculatedRiskLevelCategory } from '@/lib/types';
-import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP } from '@/lib/types';
+import { LIKELIHOOD_LEVELS_DESC_MAP, IMPACT_LEVELS_DESC_MAP, getCalculatedRiskLevel, getRiskLevelColor } from '@/lib/types'; // Corrected import
 import { useAuth } from '@/contexts/auth-context';
 import { getGoals } from '@/services/goalService';
 import { getPotentialRisksByGoalId } from '@/services/potentialRiskService';
 import { getRiskCausesByPotentialRiskId } from '@/services/riskCauseService';
 import { RiskPriorityMatrix } from '@/components/risks/risk-priority-matrix';
-import { getCalculatedRiskLevel, getRiskLevelColor } from '@/app/risk-cause-analysis/[riskCauseId]/page';
+
 
 interface AnalyzedRiskCause extends RiskCause {
   potentialRiskDescription: string;
@@ -38,6 +39,7 @@ export default function RiskPriorityPage() {
   const [sortKey, setSortKey] = useState<SortableRiskCauseKeys>('riskScore');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedCauseId, setExpandedCauseId] = useState<string | null>(null);
+  const router = useRouter();
 
 
   const currentUserId = useMemo(() => appUser?.uid || null, [appUser]);

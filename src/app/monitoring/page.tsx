@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from 'react'; // Added useState
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/page-header';
@@ -9,14 +9,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { PlusCircle, Loader2, PlayCircle, Eye, CheckCircle, Trash2 } from 'lucide-react'; // Added Trash2
+import { PlusCircle, Loader2, PlayCircle, Eye, CheckCircle, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
 import { format, parseISO } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import type { MonitoringSession, MonitoringSessionStatus } from '@/lib/types';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"; // Added AlertDialog components
-import { useToast } from '@/hooks/use-toast'; // Added useToast
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useToast } from '@/hooks/use-toast';
 
 const getStatusBadgeVariant = (status: MonitoringSessionStatus): "default" | "secondary" | "outline" | "destructive" => {
   switch (status) {
@@ -33,15 +33,15 @@ const getStatusBadgeVariant = (status: MonitoringSessionStatus): "default" | "se
 
 export default function MonitoringSessionsPage() {
   const router = useRouter();
-  const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
-  const { toast } = useToast(); // Initialize toast
+  const { currentUser, appUser, loading: contextOverallLoading, profileLoading: contextProfileLoading, isProfileComplete } = useAuth();
+  const { toast } = useToast(); 
   
   const { 
     monitoringSessions, 
     monitoringSessionsLoading, 
-    fetchMonitoringSessions, 
+    // fetchMonitoringSessions, // Tidak lagi dipanggil langsung dari sini
     deleteMonitoringSessionFromState,
-    triggerGlobalDataFetch // Destructure from store
+    triggerGlobalDataFetch
   } = useAppStore();
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
@@ -52,16 +52,24 @@ export default function MonitoringSessionsPage() {
   const [sessionToDelete, setSessionToDelete] = useState<MonitoringSession | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-
   useEffect(() => {
-    if (currentUser && currentUserId && currentPeriod && isProfileComplete && !authLoading) {
-      if (useAppStore.getState().dataFetchedForPeriod !== `${currentUserId}|${currentPeriod}`) {
-         triggerGlobalDataFetch(currentUserId, currentPeriod); // Call as a store action
-      } else if (monitoringSessions.length === 0 && !monitoringSessionsLoading) {
-         fetchMonitoringSessions(currentUserId, currentPeriod);
+    const uniquePeriodIdentifier = `${currentUserId}|${currentPeriod}`;
+    console.log(`[MonitoringPage] useEffect triggered. Current context: ${uniquePeriodIdentifier}, DataFetchedFor: ${useAppStore.getState().dataFetchedForPeriod}, OverallLoading: ${contextOverallLoading}, ProfileLoading: ${contextProfileLoading}, IsProfileComplete: ${isProfileComplete}`);
+
+    if (currentUser && currentUserId && currentPeriod && isProfileComplete && !contextOverallLoading && !contextProfileLoading) {
+      if (useAppStore.getState().dataFetchedForPeriod !== uniquePeriodIdentifier) {
+        console.log(`[MonitoringPage] Context or data status requires fetch for ${uniquePeriodIdentifier}. Triggering global data fetch.`);
+        triggerGlobalDataFetch(currentUserId, currentPeriod);
+      } else {
+        console.log(`[MonitoringPage] Data already fetched or is being fetched for ${uniquePeriodIdentifier}.`);
+        // If monitoringSessions is still empty here AND not loading, it means no sessions exist for this context.
+        // triggerGlobalDataFetch should have already populated it if sessions exist.
       }
+    } else {
+      console.log("[MonitoringPage] useEffect: Conditions for data fetch not met (user/context incomplete or loading).");
     }
-  }, [currentUser, currentUserId, currentPeriod, isProfileComplete, authLoading, fetchMonitoringSessions, triggerGlobalDataFetch, monitoringSessions.length, monitoringSessionsLoading]);
+  }, [currentUser, currentUserId, currentPeriod, isProfileComplete, contextOverallLoading, contextProfileLoading, triggerGlobalDataFetch]);
+
 
   const handleDeleteSession = (session: MonitoringSession) => {
     setSessionToDelete(session);
@@ -86,15 +94,15 @@ export default function MonitoringSessionsPage() {
     }
   };
 
-  if (authLoading || (!currentUser && !authLoading)) {
+  if (contextOverallLoading || contextProfileLoading || (!currentUser && !contextOverallLoading)) { // Combined loading check
     return (
       <div className="flex flex-col items-center justify-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-        <p className="text-xl text-muted-foreground">Memuat data pengguna...</p>
+        <p className="text-xl text-muted-foreground">Memuat data pengguna & sesi...</p>
       </div>
     );
   }
-
+  
   if (!isProfileComplete && currentUser) {
     return (
        <div className="text-center py-10">
@@ -104,8 +112,7 @@ export default function MonitoringSessionsPage() {
     )
   }
   
-  const isLoadingPage = monitoringSessionsLoading || (authLoading && !appUser);
-
+  const isLoadingPage = monitoringSessionsLoading || (contextOverallLoading && !appUser); // More specific page loading
 
   return (
     <div className="space-y-6">
@@ -114,7 +121,7 @@ export default function MonitoringSessionsPage() {
         description={`Kelola dan mulai sesi pemantauan risiko untuk UPR: ${uprDisplayName}, Periode Aplikasi: ${currentPeriod || '...'}.`}
         actions={
           <Link href="/monitoring/new" passHref>
-            <Button disabled={isLoadingPage || !currentUser}>
+            <Button disabled={isLoadingPage || !currentUser || !currentPeriod}>
               <PlusCircle className="mr-2 h-4 w-4" /> Mulai Pemantauan Baru
             </Button>
           </Link>
@@ -212,3 +219,4 @@ export default function MonitoringSessionsPage() {
     </div>
   );
 }
+
