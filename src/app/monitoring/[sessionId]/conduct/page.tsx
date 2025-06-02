@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription,CardFooter } from '@/components/ui/card';
 import type { RiskCause, ControlMeasure, MonitoringSession, RiskExposure, MonitoredRiskCauseView, MonitoringSessionStatus, MonitoredControlMeasureData } from '@/lib/types';
 import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle, UploadCloud, CornerRightDown, FileText } from 'lucide-react';
 import { getCalculatedRiskLevel, getRiskLevelColor, getControlTypeName } from  '@/lib/types';
@@ -24,6 +24,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from '@/hooks/use-toast';
 import { getMonitoringSessionById as getMonitoringSessionByIdFromService } from '@/services/monitoringService'; 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 
 const parseToleranceValue = (toleranceText: string | null): number | null => {
@@ -48,13 +49,27 @@ const calculateControlPerformance = (
   const targetValue = parseNumericValue(targetKCI);
 
   if (realizationValue === null || targetValue === null) return null;
-  if (targetValue === 0 && !isTargetNegative) return realizationValue > 0 ? 100 : 0; // Handle target 0 for positive target
-  if (targetValue === 0 && isTargetNegative) return realizationValue === 0 ? 100: (realizationValue > 0 ? 0 : 200) ; // Handle target 0 for negative target, 100% if realization is also 0.
+  
+  // Handle target 0 for positive target: if realization is > 0, it's 100% "over", if 0, it's 100% "met", if <0 it's <100%
+  // This simplistic model might need refinement based on business logic for target 0.
+  // For now, if target is 0 and non-negative, any positive realization is "good" (100%) or more.
+  // If target is 0 and negative, any non-zero realization is "bad" (0% or negative performance).
+  if (targetValue === 0) {
+    if (!isTargetNegative) { // Target 0, positive direction (e.g., achieve at least 0 defects)
+      return realizationValue <= 0 ? 100 : (100 - (realizationValue * 100)); // simplistic, needs review for "0 target" logic
+    } else { // Target 0, negative direction (e.g., maintain 0 incidents)
+      return realizationValue === 0 ? 100 : 0; // if realization is > 0, performance is 0%
+    }
+  }
+
 
   let performance: number;
-  if (isTargetNegative) {
-    performance = ((2 * targetValue - realizationValue) / Math.abs(targetValue)) * 100; // Ensure denominator is positive for percentage logic
-  } else {
+  if (isTargetNegative) { // Target is to keep value low (e.g. incidents, complaints)
+    // If realization is less than or equal to target, performance is 100% or more.
+    // If realization is greater than target, performance is less than 100%.
+    performance = ((2 * targetValue) - realizationValue) / targetValue * 100;
+
+  } else { // Target is to achieve a high value (e.g. sales, completion)
     performance = (realizationValue / targetValue) * 100;
   }
   return parseFloat(performance.toFixed(2)); 
@@ -203,7 +218,7 @@ export default function ConductMonitoringPage() {
             isTargetNegative: monitoredCtrlData?.isTargetNegative || false,
             controlActivityNarrative: monitoredCtrlData?.controlActivityNarrative || "",
             supportingDocumentUrl: monitoredCtrlData?.supportingDocumentUrl || "",
-            selectedFileName: "" // Initialize selected file name
+            selectedFileName: "" 
           };
         });
       });
@@ -283,11 +298,6 @@ export default function ConductMonitoringPage() {
     }
 
     const performance = calculateControlPerformance(formData.realizationKCI, targetKCI, formData.isTargetNegative);
-
-    // TODO: Implement actual file upload logic here if needed.
-    // For now, formData.supportingDocumentUrl is a URL string.
-    // If formData.selectedFileName is set, it means a file was selected, but not uploaded.
-
     const mcmData: Omit<MonitoredControlMeasureData, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'> = {
         monitoringSessionId: sessionId,
         riskCauseId: riskCauseId,
@@ -296,7 +306,7 @@ export default function ConductMonitoringPage() {
         isTargetNegative: formData.isTargetNegative,
         controlPerformance: performance,
         controlActivityNarrative: formData.controlActivityNarrative || null,
-        supportingDocumentUrl: formData.supportingDocumentUrl || null, // This would be the URL after upload
+        supportingDocumentUrl: formData.supportingDocumentUrl || null, 
     };
     try {
         await upsertMonitoredControlMeasureInState(mcmData, currentUserId, currentPeriod);
@@ -352,7 +362,7 @@ export default function ConductMonitoringPage() {
       {monitoredCausesWithControls.length === 0 && (
         <Card><CardContent className="pt-6 text-center"><p className="text-muted-foreground">Tidak ada penyebab risiko untuk dipantau dalam sesi ini.</p></CardContent></Card>
       )}
-      <div className="space-y-8">
+      <Accordion type="multiple" className="w-full space-y-4">
         { monitoredCausesWithControls.map((cause) => {
           const { level: currentRiskLevelText, score: currentRiskScore } = getCalculatedRiskLevel(cause.likelihood, cause.impact);
           const toleranceValue = parseToleranceValue(cause.riskTolerance);
@@ -374,27 +384,30 @@ export default function ConductMonitoringPage() {
             }
           }
           return (
-            <Card key={cause.id} className="shadow-lg rounded-lg">
-              <CardHeader className="bg-muted/30 rounded-t-lg">
-                <CardTitle className="text-base">{cause.riskCauseCode} - {cause.description}</CardTitle>
-                <CardDescription className="text-xs">Sumber: <Badge variant="outline">{cause.source}</Badge> | Potensi Risiko Induk: {cause.potentialRiskCode} - {cause.potentialRiskDescription}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6 pt-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                  <div><Label className="font-semibold">Tingkat Risiko Awal</Label><div><Badge className={`${getRiskLevelColor(currentRiskLevelText)}`}>{currentRiskLevelText === 'N/A' ? 'N/A' : `${currentRiskLevelText} (${currentRiskScore ?? 'N/A'})`}</Badge></div></div>
-                  <div><Label className="font-semibold">KRI</Label><p className="text-muted-foreground">{cause.keyRiskIndicator || "-"}</p></div>
-                  <div><Label className="font-semibold">Toleransi Risiko</Label><p className="text-muted-foreground">{cause.riskTolerance || "-"} {toleranceValue !== null ? `(Nilai: ${toleranceValue})` : ''}</p></div>
+            <AccordionItem key={cause.id} value={cause.id} className="border rounded-lg shadow-lg bg-card">
+              <AccordionTrigger className="p-4 hover:no-underline rounded-t-lg data-[state=open]:rounded-b-none data-[state=open]:border-b">
+                <div className="flex-1 text-left space-y-1">
+                  <CardTitle className="text-base">{cause.riskCauseCode} - {cause.description}</CardTitle>
+                  <CardDescription className="text-xs space-y-0.5">
+                    <div>Sumber: <Badge variant="outline" className="text-xs">{cause.source}</Badge> | Potensi Risiko Induk: {cause.potentialRiskCode} - {cause.potentialRiskDescription}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs pt-1">
+                      <div><span className="font-medium">Tingkat Risiko Awal:</span> <Badge className={`${getRiskLevelColor(currentRiskLevelText)} text-xs`}>{currentRiskLevelText === 'N/A' ? 'N/A' : `${currentRiskLevelText} (${currentRiskScore ?? 'N/A'})`}</Badge></div>
+                      <div><span className="font-medium">KRI:</span> <span className="text-muted-foreground">{cause.keyRiskIndicator || "-"}</span></div>
+                      <div><span className="font-medium">Toleransi:</span> <span className="text-muted-foreground">{cause.riskTolerance || "-"} {toleranceValue !== null ? `(Nilai: ${toleranceValue})` : ''}</span></div>
+                    </div>
+                  </CardDescription>
                 </div>
-                <Separator />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              </AccordionTrigger>
+              <AccordionContent className="p-4 pt-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-4">
                     <div className="space-y-3">
                         <div><Label htmlFor={`exposureValue-${cause.id}`}>Realisasi KRI (Nilai Risiko yang Terjadi)</Label><Input id={`exposureValue-${cause.id}`} type="number" placeholder="Nilai numerik risiko yang terjadi" value={exposureValues[cause.id] ?? ''} onChange={(e) => handleExposureValueChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
                         <div><Label htmlFor={`exposureNotes-${cause.id}`}>Catatan/Deskripsi Paparan Risiko</Label><Textarea id={`exposureNotes-${cause.id}`} placeholder="Jelaskan konteks paparan..." rows={2} value={exposureNotes[cause.id] ?? ''} onChange={(e) => handleExposureNotesChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
                         <Button onClick={() => handleSaveExposure(cause.id)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'} size="sm">{savingStates[cause.id] ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Simpan Paparan</Button>
                     </div>
-                    {comparisonResultText && (<Alert variant={isExceeded ? "destructive" : "default"} className={isExceeded === false ? "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700" : ""}>{isExceeded ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}<AlertTitle className={isExceeded === false ? "text-green-800 dark:text-green-200" : ""}>{isExceeded ? "Risiko Melebihi Toleransi!" : "Risiko Terkendali"}</AlertTitle><AlertDescription className={isExceeded === false ? "text-green-700 dark:text-green-300" : ""}><p className="font-semibold">{comparisonResultText}</p><p className="mt-1">{guidanceText}</p></AlertDescription></Alert>)}
+                    {comparisonResultText && (<Alert variant={isExceeded ? "destructive" : "default"} className={isExceeded === false ? "bg-green-50 dark:bg-green-500/30 border-green-200 dark:border-green-700" : ""}>{isExceeded ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}<AlertTitle className={isExceeded === false ? "text-green-800 dark:text-green-200" : ""}>{isExceeded ? "Risiko Melebihi Toleransi!" : "Risiko Terkendali"}</AlertTitle><AlertDescription className={isExceeded === false ? "text-green-700 dark:text-green-300" : ""}><p className="font-semibold">{comparisonResultText}</p><p className="mt-1">{guidanceText}</p></AlertDescription></Alert>)}
                 </div>
-                <Separator />
+                <Separator className="my-6" />
                 <div>
                     <h4 className="text-sm font-semibold mb-3">Pemantauan Pelaksanaan Pengendalian Risiko ({cause.controls.length} Kontrol)</h4>
                     {cause.controls.length === 0 ? (<p className="text-xs text-muted-foreground italic">Belum ada rencana pengendalian yang disusun untuk penyebab risiko ini.</p>) :
@@ -404,18 +417,28 @@ export default function ConductMonitoringPage() {
                            const formState = controlMonitoringFormValues[ctrl.id] || { realizationKCI: "", isTargetNegative: false, controlActivityNarrative: "", supportingDocumentUrl: "", selectedFileName: ""};
                            const calculatedPerformance = calculateControlPerformance(formState.realizationKCI, ctrl.target, formState.isTargetNegative);
                            const performanceTooltipText = formState.isTargetNegative 
-                             ? "Rumus Target Negatif: ((2 * Target - Realisasi) / |Target|) * 100%"
-                             : "Rumus Target Positif: (Realisasi / Target) * 100%";
+                             ? `Target Negatif. Rumus: ((2 * Target - Realisasi) / Target) * 100%. Target: ${ctrl.target || 'N/A'}. Realisasi: ${formState.realizationKCI || 'N/A'}`
+                             : `Target Positif. Rumus: (Realisasi / Target) * 100%. Target: ${ctrl.target || 'N/A'}. Realisasi: ${formState.realizationKCI || 'N/A'}`;
+                           const isMonitored = monitoredControlMeasuresData.some(
+                              (mcmd) => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id
+                           );
 
                            return (
-                            <Card key={ctrl.id} className="min-w-[300px] w-full md:w-1/2 lg:w-1/3 xl:min-w-[360px] xl:w-auto flex-shrink-0 shadow-md flex flex-col">
-                                <CardHeader className="pb-3 pt-4 bg-slate-50 dark:bg-slate-800/50 rounded-t-md">
-                                    <CardTitle className="text-sm">({index + 1}) {controlCode} - {getControlTypeName(ctrl.controlType)}</CardTitle>
-                                    <CardDescription className="text-xs line-clamp-2" title={ctrl.description}>{ctrl.description}</CardDescription>
+                            <Card key={ctrl.id} className="min-w-[320px] sm:min-w-[360px] max-w-md w-full lg:w-1/3 flex-shrink-0 shadow-md flex flex-col">
+                                <CardHeader className="pb-3 pt-4 bg-muted/50 dark:bg-slate-800 rounded-t-md min-h-[100px]">
+                                    <div className="flex justify-between items-start">
+                                        <CardTitle className="text-sm flex items-center">
+                                            {isMonitored && <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />} 
+                                            ({index + 1}) {controlCode} - {getControlTypeName(ctrl.controlType)}
+                                        </CardTitle>
+                                        {/* Optionally, show KCI/Target in header if space allows, or performance if calculated */}
+                                    </div>
+                                    <CardDescription className="text-muted-foreground text-xs line-clamp-2" title={ctrl.description}>{ctrl.description}</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3 text-xs pt-3 flex-grow">
-                                    <div className='text-xs'>
-                                        <p><span className="font-medium">KCI Pengendalian:</span> {ctrl.keyControlIndicator || "-"}</p>
+                                    <div className='text-xs flex flex-row space-x-2'>
+                                        <p><span className="font-medium">KCI Pengendalian:</span></p>
+                                        <p className="text-muted-foreground">{ctrl.keyControlIndicator || "-"}</p>
                                     </div>
                                     <div className="grid grid-cols-2 gap-x-3">
                                         <div><Label className="font-medium">Target KCI</Label><p className="text-muted-foreground text-xs">{ctrl.target || "-"}</p></div>
@@ -426,7 +449,7 @@ export default function ConductMonitoringPage() {
                                         <Label htmlFor={`isTargetNegative-${ctrl.id}`} className="text-xs font-normal">Target Negatif (makin rendah realisasi, makin baik)</Label>
                                     </div>
                                     <div>
-                                        <Label className="flex items-center">Kinerja Pengendalian (%)
+                                        <Label className="flex items-center">Kinerja Pengendalian Risiko (%)
                                           <TooltipProvider>
                                             <Tooltip>
                                               <TooltipTrigger asChild>
@@ -464,11 +487,11 @@ export default function ConductMonitoringPage() {
                      </div>)
                     }
                 </div>
-              </CardContent>
-            </Card>
+              </AccordionContent>
+            </AccordionItem>
           )
         })}
-      </div>
+      </Accordion>
       {currentSession.status !== 'Selesai' && monitoredCausesWithControls.length > 0 && (
         <div className="mt-8 flex justify-end">
           <Button onClick={handleCompleteMonitoring} variant="default" size="lg"><CheckCircle2 className="mr-2 h-5 w-5" /> Selesaikan Sesi Pemantauan Ini</Button>
@@ -478,5 +501,3 @@ export default function ConductMonitoringPage() {
   );
 }
 
-
-    
