@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription,CardFooter } from '@/components/ui/card';
 import type { RiskCause, ControlMeasure, MonitoringSession, RiskExposure, MonitoredRiskCauseView, MonitoringSessionStatus, MonitoredControlMeasureData } from '@/lib/types';
-import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle, UploadCloud, CornerRightDown, FileText } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle, UploadCloud, CornerRightDown, FileText, Search } from 'lucide-react';
 import { getCalculatedRiskLevel, getRiskLevelColor, getControlTypeName } from  '@/lib/types';
 import { Separator } from '@/components/ui/separator';
 import { format, parseISO, isValid as isValidDate } from 'date-fns';
@@ -50,26 +50,18 @@ const calculateControlPerformance = (
 
   if (realizationValue === null || targetValue === null) return null;
   
-  // Handle target 0 for positive target: if realization is > 0, it's 100% "over", if 0, it's 100% "met", if <0 it's <100%
-  // This simplistic model might need refinement based on business logic for target 0.
-  // For now, if target is 0 and non-negative, any positive realization is "good" (100%) or more.
-  // If target is 0 and negative, any non-zero realization is "bad" (0% or negative performance).
   if (targetValue === 0) {
-    if (!isTargetNegative) { // Target 0, positive direction (e.g., achieve at least 0 defects)
-      return realizationValue <= 0 ? 100 : (100 - (realizationValue * 100)); // simplistic, needs review for "0 target" logic
-    } else { // Target 0, negative direction (e.g., maintain 0 incidents)
-      return realizationValue === 0 ? 100 : 0; // if realization is > 0, performance is 0%
+    if (!isTargetNegative) { 
+      return realizationValue <= 0 ? 100 : (100 - (realizationValue * 100)); 
+    } else { 
+      return realizationValue === 0 ? 100 : 0; 
     }
   }
 
-
   let performance: number;
-  if (isTargetNegative) { // Target is to keep value low (e.g. incidents, complaints)
-    // If realization is less than or equal to target, performance is 100% or more.
-    // If realization is greater than target, performance is less than 100%.
+  if (isTargetNegative) { 
     performance = ((2 * targetValue) - realizationValue) / targetValue * 100;
-
-  } else { // Target is to achieve a high value (e.g. sales, completion)
+  } else { 
     performance = (realizationValue / targetValue) * 100;
   }
   return parseFloat(performance.toFixed(2)); 
@@ -116,6 +108,7 @@ export default function ConductMonitoringPage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [savingStates, setSavingStates] = useState<Record<string, boolean>>({}); 
   const [controlSavingStates, setControlSavingStates] = useState<Record<string, boolean>>({});
+  const [searchTerm, setSearchTerm] = useState('');
 
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
@@ -188,6 +181,7 @@ export default function ConductMonitoringPage() {
           return {
             ...rc,
             potentialRiskDescription: potentialRisk?.description || "N/A",
+            goalName: goal?.name || "N/A",
             goalCode: goal?.code || "N/A",
             potentialRiskCode: `${goal?.code || 'S?'}.PR${potentialRisk?.sequenceNumber || '?'}`,
             riskCauseCode: `${goal?.code || 'S?'}.PR${potentialRisk?.sequenceNumber || '?'}.PC${rc.sequenceNumber || '?'}`,
@@ -228,6 +222,18 @@ export default function ConductMonitoringPage() {
     }
   }, [currentSession, riskCauses, controlMeasures, riskExposures, monitoredControlMeasuresData, store.potentialRisks, store.goals, currentUserId, currentPeriod]);
 
+  const filteredMonitoredCauses = useMemo(() => {
+    if (!searchTerm) return monitoredCausesWithControls;
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    return monitoredCausesWithControls.filter(cause =>
+      cause.description.toLowerCase().includes(lowerSearchTerm) ||
+      (cause.riskCauseCode && cause.riskCauseCode.toLowerCase().includes(lowerSearchTerm)) ||
+      (cause.potentialRiskDescription && cause.potentialRiskDescription.toLowerCase().includes(lowerSearchTerm)) ||
+      (cause.potentialRiskCode && cause.potentialRiskCode.toLowerCase().includes(lowerSearchTerm)) ||
+      (cause.goalName && cause.goalName.toLowerCase().includes(lowerSearchTerm)) ||
+      (cause.goalCode && cause.goalCode.toLowerCase().includes(lowerSearchTerm))
+    );
+  }, [monitoredCausesWithControls, searchTerm]);
 
   const handleExposureValueChange = (riskCauseId: string, value: string) => {
     setExposureValues(prev => ({ ...prev, [riskCauseId]: value }));
@@ -330,6 +336,79 @@ export default function ConductMonitoringPage() {
     }
   };
 
+  const handleDownloadReport = () => {
+    if (!currentSession || !currentUser || !appUser) {
+      toast({ title: "Konteks tidak lengkap", description: "Data sesi atau pengguna tidak tersedia untuk membuat laporan.", variant: "warning" });
+      return;
+    }
+
+    const reportData = {
+      sesiPemantauan: {
+        nama: currentSession.name,
+        tanggalMulai: format(parseISO(currentSession.startDate), "dd MMMM yyyy", { locale: localeID }),
+        tanggalSelesai: format(parseISO(currentSession.endDate), "dd MMMM yyyy", { locale: localeID }),
+        status: currentSession.status,
+        upr: uprDisplayName,
+        periodeAplikasi: currentPeriod,
+      },
+      detailPemantauan: filteredMonitoredCauses.map(cause => {
+        const parentPotentialRisk = store.potentialRisks.find(pr => pr.id === cause.potentialRiskId);
+        const grandParentGoal = parentPotentialRisk ? store.goals.find(g => g.id === parentPotentialRisk.goalId) : null;
+        
+        return {
+          sasaran: {
+            kode: grandParentGoal?.code || "N/A",
+            nama: grandParentGoal?.name || "N/A",
+            deskripsi: grandParentGoal?.description || "N/A",
+          },
+          potensiRisiko: {
+            kode: parentPotentialRisk?.sequenceNumber ? `${grandParentGoal?.code || 'S?'}.PR${parentPotentialRisk.sequenceNumber}` : "N/A",
+            deskripsi: parentPotentialRisk?.description || "N/A",
+            kategori: parentPotentialRisk?.category || "N/A",
+            pemilik: parentPotentialRisk?.owner || "N/A",
+          },
+          penyebabRisiko: {
+            kode: cause.riskCauseCode,
+            deskripsi: cause.description,
+            sumber: cause.source,
+            kri: cause.keyRiskIndicator || "N/A",
+            toleransi: cause.riskTolerance || "N/A",
+            tingkatRisikoAwal: getCalculatedRiskLevel(cause.likelihood, cause.impact).level,
+            skorRisikoAwal: getCalculatedRiskLevel(cause.likelihood, cause.impact).score,
+            paparanRisiko: {
+              nilai: cause.riskExposure?.exposureValue,
+              catatan: cause.riskExposure?.exposureNotes,
+              tanggalCatat: cause.riskExposure?.recordedAt ? format(parseISO(cause.riskExposure.recordedAt), "dd/MM/yy HH:mm", { locale: localeID }) : "N/A",
+            },
+            pemantauanPengendalian: cause.controls.map(ctrl => {
+              const monitoredData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
+              return {
+                kodePengendalian: `${cause.riskCauseCode}.${ctrl.controlType}.${ctrl.sequenceNumber}`,
+                deskripsiPengendalian: ctrl.description,
+                tipe: getControlTypeName(ctrl.controlType),
+                kciPengendalian: ctrl.keyControlIndicator || "N/A",
+                targetPengendalian: ctrl.target || "N/A",
+                realisasiKCI: monitoredData?.realizationKCI || "N/A",
+                targetNegatif: monitoredData?.isTargetNegative ? "Ya" : "Tidak",
+                kinerjaPengendalian: monitoredData?.controlPerformance !== null ? `${monitoredData?.controlPerformance}%` : "N/A",
+                narasiKegiatan: monitoredData?.controlActivityNarrative || "N/A",
+                dataDukungUrl: monitoredData?.supportingDocumentUrl || "N/A",
+                tanggalCatatMonitor: monitoredData?.recordedAt ? format(parseISO(monitoredData.recordedAt), "dd/MM/yy HH:mm", { locale: localeID }) : "N/A",
+              };
+            }),
+          },
+        };
+      }),
+    };
+
+    console.log("Data Laporan Pemantauan (Konsep):", JSON.stringify(reportData, null, 2));
+    toast({
+      title: "Konsep Laporan",
+      description: "Data laporan telah dicetak ke konsol browser. Fitur unduh file (PDF/Excel) akan dikembangkan selanjutnya.",
+      duration: 7000,
+    });
+  };
+
 
   if (authLoading || pageLoading || riskCausesLoading || controlMeasuresLoading || riskExposuresLoading || monitoredControlMeasuresLoading) {
     return (
@@ -350,20 +429,48 @@ export default function ConductMonitoringPage() {
       </div>
     );
   }
+  const pageDescription = `UPR: ${uprDisplayName}, Periode Sesi: ${format(parseISO(currentSession.startDate), "dd MMM yyyy", { locale: localeID })} - ${format(parseISO(currentSession.endDate), "dd MMM yyyy", { locale: localeID })}. Status: ${currentSession.status}. Menampilkan ${filteredMonitoredCauses.length} dari ${monitoredCausesWithControls.length} penyebab risiko yang dipantau.`;
+
    return (
     <div className="space-y-6">
       <PageHeader
         title={`Pelaksanaan Pemantauan: ${currentSession.name}`}
-        description={`UPR: ${uprDisplayName}, Periode Sesi: ${format(parseISO(currentSession.startDate), "dd MMM yyyy", { locale: localeID })} - ${format(parseISO(currentSession.endDate), "dd MMM yyyy", { locale: localeID })}. Status: ${currentSession.status}`}
+        description={pageDescription}
         actions={
-          <Link href="/monitoring" passHref><Button variant="outline"><ArrowLeft className="mr-2 h-4 w-4" /> Kembali</Button></Link>
+            <div className="flex space-x-2">
+                <Button variant="outline" onClick={handleDownloadReport} disabled={currentSession.status !== 'Selesai'}>
+                    <FileText className="mr-2 h-4 w-4" /> Unduh Laporan (Konsep)
+                </Button>
+                <Link href="/monitoring" passHref><Button variant="outline"><ArrowLeft className="mr-2 h-4 w-4" /> Kembali</Button></Link>
+            </div>
         }
       />
-      {monitoredCausesWithControls.length === 0 && (
-        <Card><CardContent className="pt-6 text-center"><p className="text-muted-foreground">Tidak ada penyebab risiko untuk dipantau dalam sesi ini.</p></CardContent></Card>
+      <div className="mb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Cari kode atau deskripsi penyebab risiko, potensi risiko, atau sasaran..."
+            className="pl-10 w-full md:w-1/2 lg:w-1/3"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {filteredMonitoredCauses.length === 0 && !pageLoading && (
+        <Card>
+          <CardContent className="pt-6 text-center">
+            <p className="text-muted-foreground">
+              {monitoredCausesWithControls.length === 0 
+                ? "Tidak ada penyebab risiko untuk dipantau dalam sesi ini." 
+                : "Tidak ada penyebab risiko yang cocok dengan pencarian Anda."}
+            </p>
+          </CardContent>
+        </Card>
       )}
       <Accordion type="multiple" className="w-full space-y-4">
-        { monitoredCausesWithControls.map((cause) => {
+        { filteredMonitoredCauses.map((cause) => {
           const { level: currentRiskLevelText, score: currentRiskScore } = getCalculatedRiskLevel(cause.likelihood, cause.impact);
           const toleranceValue = parseToleranceValue(cause.riskTolerance);
           const exposureValueNum = exposureValues[cause.id] !== '' && exposureValues[cause.id] !== undefined ? Number(exposureValues[cause.id]) : null;
@@ -424,14 +531,13 @@ export default function ConductMonitoringPage() {
                            );
 
                            return (
-                            <Card key={ctrl.id} className="min-w-[320px] sm:min-w-[360px] max-w-md w-full lg:w-1/3 flex-shrink-0 shadow-md flex flex-col">
+                            <Card key={ctrl.id} className="min-w-[320px] sm:min-w-[360px] lg:w-1/3 flex-shrink-0 shadow-md flex flex-col">
                                 <CardHeader className="pb-3 pt-4 bg-muted/50 dark:bg-slate-800 rounded-t-md min-h-[100px]">
                                     <div className="flex justify-between items-start">
                                         <CardTitle className="text-sm flex items-center">
                                             {isMonitored && <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />} 
                                             ({index + 1}) {controlCode} - {getControlTypeName(ctrl.controlType)}
                                         </CardTitle>
-                                        {/* Optionally, show KCI/Target in header if space allows, or performance if calculated */}
                                     </div>
                                     <CardDescription className="text-muted-foreground text-xs line-clamp-2" title={ctrl.description}>{ctrl.description}</CardDescription>
                                 </CardHeader>
