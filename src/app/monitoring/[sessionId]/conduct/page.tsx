@@ -1,5 +1,6 @@
-
-"use client";
+{
+  "use client";
+}
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -25,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { getMonitoringSessionById as getMonitoringSessionByIdFromService } from '@/services/monitoringService'; 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { cn } from '@/lib/utils';
 
 
 const parseToleranceValue = (toleranceText: string | null): number | null => {
@@ -60,7 +62,15 @@ const calculateControlPerformance = (
 
   let performance: number;
   if (isTargetNegative) { 
+    // Rumus: ((2 * Target - Realisasi) / Target) * 100%
+    // Ini dapat disederhanakan atau diperiksa ulang.
+    // Jika Realisasi = Target, Kinerja = 100%
+    // Jika Realisasi < Target, Kinerja > 100% (Baik)
+    // Jika Realisasi > Target, Kinerja < 100% (Buruk)
+    // Contoh: Target 10 (negatif), Realisasi 5 -> ((2*10 - 5)/10)*100 = (15/10)*100 = 150% (Lebih baik dari target)
+    // Target 10 (negatif), Realisasi 15 -> ((2*10 - 15)/10)*100 = (5/10)*100 = 50% (Lebih buruk dari target)
     performance = ((2 * targetValue) - realizationValue) / targetValue * 100;
+
   } else { 
     performance = (realizationValue / targetValue) * 100;
   }
@@ -505,7 +515,7 @@ export default function ConductMonitoringPage() {
                   </CardDescription>
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="p-4 pt-0">
+              <AccordionContent className={cn("p-4 pt-0", "w-full")}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-4">
                     <div className="space-y-3">
                         <div><Label htmlFor={`exposureValue-${cause.id}`}>Realisasi KRI (Nilai Risiko yang Terjadi)</Label><Input id={`exposureValue-${cause.id}`} type="number" placeholder="Nilai numerik risiko yang terjadi" value={exposureValues[cause.id] ?? ''} onChange={(e) => handleExposureValueChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
@@ -516,7 +526,9 @@ export default function ConductMonitoringPage() {
                 </div>
                 <Separator className="my-6" />
                 <div>
-                    <h4 className="text-sm font-semibold mb-3">Pemantauan Pelaksanaan Pengendalian Risiko ({cause.controls.length} Kontrol)</h4>
+                    <h4 className="text-sm font-semibold mb-3">
+                        Pemantauan Pelaksanaan Pengendalian Risiko ({cause.controls.length} Kontrol)
+                    </h4>
                     {cause.controls.length === 0 ? (<p className="text-xs text-muted-foreground italic">Belum ada rencana pengendalian yang disusun untuk penyebab risiko ini.</p>) :
                      (<div className="flex overflow-x-auto space-x-4 pb-2 -mx-1 px-1">
                         {cause.controls.map((ctrl, index) => {
@@ -555,7 +567,7 @@ export default function ConductMonitoringPage() {
                                         <Label htmlFor={`isTargetNegative-${ctrl.id}`} className="text-xs font-normal">Target Negatif (makin rendah realisasi, makin baik)</Label>
                                     </div>
                                     <div>
-                                        <Label className="flex items-center">Kinerja Pengendalian Risiko (%)
+                                        <Label className="flex items-center">Kinerja Pengendalian (%)
                                           <TooltipProvider>
                                             <Tooltip>
                                               <TooltipTrigger asChild>
@@ -606,4 +618,3 @@ export default function ConductMonitoringPage() {
     </div>
   );
 }
-
