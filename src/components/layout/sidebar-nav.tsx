@@ -26,7 +26,7 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
   const { openMobile, setOpenMobile } = useSidebar();
   
   const navItems: NavItem[] = [
-    { label: "Dasbor", href: "/", icon: LayoutDashboard, disabled: profileIncomplete },
+    { label: "Dashboard", href: "/", icon: LayoutDashboard, disabled: profileIncomplete },
     { label: "Sasaran", href: "/goals", icon: Target, disabled: profileIncomplete },
     { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText, disabled: profileIncomplete }, 
     { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3, disabled: profileIncomplete }, 
