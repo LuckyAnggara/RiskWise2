@@ -1,20 +1,20 @@
 
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea'; // Although not used yet, might be for description
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { MonitoringSession, RiskCause } from '@/lib/types';
+import type { MonitoringSession, RiskCause, PotentialRisk, Goal, CalculatedRiskLevelCategory } from '@/lib/types';
+import { getCalculatedRiskLevel, getRiskLevelColor } from '@/lib/types';
 import { useForm, type SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { ArrowLeft, Loader2, Save, Calendar as CalendarIcon, ListChecks, Search } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, Calendar as CalendarIcon, ListChecks, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
@@ -23,6 +23,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { format, parseISO, startOfToday, addMonths } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
@@ -32,12 +33,23 @@ const monitoringSessionFormSchema = z.object({
   startDate: z.date({ required_error: "Tanggal mulai harus diisi." }),
   endDate: z.date({ required_error: "Tanggal selesai harus diisi." }),
   riskCauseIdsToMonitor: z.array(z.string()).min(1, "Pilih minimal satu penyebab risiko untuk dipantau."),
-}).refine(data => data.endDate > data.startDate, {
-  message: "Tanggal selesai harus setelah tanggal mulai.",
+}).refine(data => data.endDate >= data.startDate, { // Allow same day
+  message: "Tanggal selesai harus setelah atau sama dengan tanggal mulai.",
   path: ["endDate"],
 });
 
 type MonitoringSessionFormData = z.infer<typeof monitoringSessionFormSchema>;
+
+interface EnrichedRiskCause extends RiskCause {
+  potentialRiskCode: string;
+  riskCauseCode: string;
+  goalName: string;
+  goalCode: string;
+  riskLevelData: { level: CalculatedRiskLevelCategory | 'N/A'; score: number | null };
+}
+
+type SortableKeys = 'riskCauseCode' | 'description' | 'riskLevelScore';
+
 
 export default function NewMonitoringSessionPage() {
   const router = useRouter();
@@ -45,11 +57,23 @@ export default function NewMonitoringSessionPage() {
   const { toast } = useToast();
   
   const store = useAppStore();
-  const allRiskCauses = store.riskCauses; // Mengambil semua penyebab risiko dari store
-  const addMonitoringSessionToState = store.addMonitoringSessionToState;
+  const { 
+    riskCauses: allRiskCausesFromStore, 
+    potentialRisks: allPotentialRisksFromStore, 
+    goals: allGoalsFromStore,
+    riskCausesLoading, 
+    potentialRisksLoading, 
+    goalsLoading,
+    fetchRiskCauses, // Ensure these are available from store
+    fetchPotentialRisks,
+    fetchGoals: fetchGoalsFromStore, // Renamed to avoid conflict
+    addMonitoringSessionToState 
+  } = store;
+
 
   const [isSaving, setIsSaving] = useState(false);
   const [searchTermCause, setSearchTermCause] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'riskLevelScore', direction: 'descending' });
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod, [appUser]);
@@ -68,7 +92,7 @@ export default function NewMonitoringSessionPage() {
     defaultValues: {
       name: `Pemantauan Risiko - ${format(new Date(), "MMMM yyyy", { locale: localeID })}`,
       startDate: startOfToday(),
-      endDate: addMonths(startOfToday(), 3), // Default 3 bulan dari sekarang
+      endDate: addMonths(startOfToday(), 1), 
       riskCauseIdsToMonitor: [],
     },
   });
@@ -79,11 +103,109 @@ export default function NewMonitoringSessionPage() {
     if (!authLoading && (!currentUser || !isProfileComplete)) {
       router.push(currentUser ? '/settings' : '/login');
     }
-    // Memastikan data penyebab risiko sudah dimuat jika belum
-    if (currentUserId && currentPeriod && allRiskCauses.length === 0 && !store.riskCausesLoading) {
-      store.fetchRiskCauses(currentUserId, currentPeriod);
+    if (currentUserId && currentPeriod) {
+        if (allGoalsFromStore.length === 0 && !goalsLoading) {
+            console.log("[NewMonitoringSessionPage] Fetching goals...");
+            fetchGoalsFromStore(currentUserId, currentPeriod);
+        }
+        if (allPotentialRisksFromStore.length === 0 && !potentialRisksLoading && !goalsLoading) {
+             console.log("[NewMonitoringSessionPage] Fetching potential risks...");
+            fetchPotentialRisks(currentUserId, currentPeriod);
+        }
+        if (allRiskCausesFromStore.length === 0 && !riskCausesLoading && !potentialRisksLoading) {
+            console.log("[NewMonitoringSessionPage] Fetching risk causes...");
+            fetchRiskCauses(currentUserId, currentPeriod);
+        }
     }
-  }, [authLoading, currentUser, isProfileComplete, router, currentUserId, currentPeriod, allRiskCauses.length, store.riskCausesLoading, store.fetchRiskCauses]);
+  }, [
+    authLoading, currentUser, isProfileComplete, router, currentUserId, currentPeriod, 
+    allGoalsFromStore.length, goalsLoading, fetchGoalsFromStore,
+    allPotentialRisksFromStore.length, potentialRisksLoading, fetchPotentialRisks,
+    allRiskCausesFromStore.length, riskCausesLoading, fetchRiskCauses
+  ]);
+
+  const enrichedRiskCauses = useMemo(() => {
+    if (goalsLoading || potentialRisksLoading || riskCausesLoading) return [];
+    return allRiskCausesFromStore
+      .map(cause => {
+        const potentialRisk = allPotentialRisksFromStore.find(pr => pr.id === cause.potentialRiskId && pr.userId === currentUserId && pr.period === currentPeriod);
+        const goal = potentialRisk ? allGoalsFromStore.find(g => g.id === potentialRisk.goalId && g.userId === currentUserId && g.period === currentPeriod) : null;
+        
+        const goalCodeDisplay = goal?.code || 'S?';
+        const prCodeDisplay = `${goalCodeDisplay}.PR${potentialRisk?.sequenceNumber || '?'}`;
+        const rcCodeDisplay = `${prCodeDisplay}.PC${cause.sequenceNumber || '?'}`;
+        const riskLevelData = getCalculatedRiskLevel(cause.likelihood, cause.impact);
+
+        return {
+          ...cause,
+          potentialRiskCode: prCodeDisplay,
+          riskCauseCode: rcCodeDisplay,
+          goalName: goal?.name || "N/A",
+          goalCode: goal?.code || "N/A",
+          riskLevelData,
+        };
+      })
+      .filter(cause => cause.likelihood && cause.impact); // Hanya yang sudah dianalisis
+  }, [allRiskCausesFromStore, allPotentialRisksFromStore, allGoalsFromStore, currentUserId, currentPeriod, goalsLoading, potentialRisksLoading, riskCausesLoading]);
+
+  const requestSort = (key: SortableKeys) => {
+    let direction: 'ascending' | 'descending' = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    } else if (sortConfig.key === key && sortConfig.direction === 'descending') {
+      // Optional: cycle back to default or remove sort on third click
+      // For now, just toggle
+      direction = 'ascending';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const SortIndicator = ({ columnKey }: { columnKey: SortableKeys }) => {
+    if (sortConfig.key !== columnKey) {
+      return null;
+    }
+    return sortConfig.direction === 'ascending' ? <ChevronUp className="h-4 w-4 ml-1 inline-block" /> : <ChevronDown className="h-4 w-4 ml-1 inline-block" />;
+  };
+  
+  const sortedFilteredRiskCauses = useMemo(() => {
+    let causesToFilter = [...enrichedRiskCauses];
+    
+    if (searchTermCause) {
+      const lowerSearchTerm = searchTermCause.toLowerCase();
+      causesToFilter = causesToFilter.filter(cause =>
+        cause.description.toLowerCase().includes(lowerSearchTerm) ||
+        cause.riskCauseCode.toLowerCase().includes(lowerSearchTerm) ||
+        cause.potentialRiskCode.toLowerCase().includes(lowerSearchTerm) ||
+        cause.goalName.toLowerCase().includes(lowerSearchTerm) ||
+        cause.goalCode.toLowerCase().includes(lowerSearchTerm)
+      );
+    }
+
+    return causesToFilter.sort((a, b) => {
+      if (sortConfig.key) {
+        let valA: any;
+        let valB: any;
+
+        if (sortConfig.key === 'riskLevelScore') {
+          valA = a.riskLevelData.score ?? -1; // Treat null score as lowest
+          valB = b.riskLevelData.score ?? -1;
+        } else {
+          valA = a[sortConfig.key];
+          valB = b[sortConfig.key];
+        }
+        
+        if (typeof valA === 'string' && typeof valB === 'string') {
+          const comparison = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+          return sortConfig.direction === 'ascending' ? comparison : -comparison;
+        }
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
+        }
+      }
+      return 0;
+    });
+  }, [enrichedRiskCauses, searchTermCause, sortConfig]);
+
 
   const onSubmit: SubmitHandler<MonitoringSessionFormData> = async (data) => {
     if (!currentUserId || !currentPeriod) {
@@ -114,25 +236,17 @@ export default function NewMonitoringSessionPage() {
     }
   };
 
-  const filteredRiskCauses = useMemo(() => {
-    if (!allRiskCauses) return [];
-    return allRiskCauses.filter(cause =>
-      cause.description.toLowerCase().includes(searchTermCause.toLowerCase()) ||
-      (cause.potentialRiskCode && cause.potentialRiskCode.toLowerCase().includes(searchTermCause.toLowerCase())) ||
-      (cause.riskCauseCode && cause.riskCauseCode.toLowerCase().includes(searchTermCause.toLowerCase()))
-    ).filter(cause => cause.likelihood && cause.impact); // Hanya yang sudah dianalisis
-  }, [allRiskCauses, searchTermCause]);
-
   const handleToggleSelectAllCauses = (checked: boolean) => {
     if (checked) {
-      setValue("riskCauseIdsToMonitor", filteredRiskCauses.map(rc => rc.id));
+      setValue("riskCauseIdsToMonitor", sortedFilteredRiskCauses.map(rc => rc.id));
     } else {
       setValue("riskCauseIdsToMonitor", []);
     }
   };
 
+  const isLoadingInitialData = authLoading || goalsLoading || potentialRisksLoading || riskCausesLoading;
 
-  if (authLoading || (!currentUser && !authLoading)) {
+  if (isLoadingInitialData && !currentUser) { // If auth is loading and no user yet, show main loader
     return (
       <div className="flex flex-col items-center justify-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -147,7 +261,7 @@ export default function NewMonitoringSessionPage() {
         <p className="text-muted-foreground">Harap lengkapi profil UPR dan Periode Anda di Pengaturan untuk membuat sesi pemantauan.</p>
         <Button onClick={() => router.push('/settings')} className="mt-4">Ke Pengaturan</Button>
       </div>
-    )
+    );
   }
 
   return (
@@ -251,31 +365,31 @@ export default function NewMonitoringSessionPage() {
                     className="pl-10 w-full"
                     value={searchTermCause}
                     onChange={(e) => setSearchTermCause(e.target.value)}
-                    disabled={isSaving || store.riskCausesLoading}
+                    disabled={isSaving || isLoadingInitialData}
                 />
               </div>
               {errors.riskCauseIdsToMonitor && <p className="text-xs text-destructive">{errors.riskCauseIdsToMonitor.message}</p>}
               
-              {store.riskCausesLoading ? (
+              {isLoadingInitialData ? (
                  <div className="flex justify-center items-center py-6">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     <p className="ml-2 text-muted-foreground">Memuat daftar penyebab risiko...</p>
                 </div>
-              ): filteredRiskCauses.length === 0 ? (
+              ): sortedFilteredRiskCauses.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  {allRiskCauses.length === 0 ? "Belum ada penyebab risiko yang dianalisis." : "Tidak ada penyebab risiko yang cocok dengan pencarian atau belum dianalisis."}
+                  {allRiskCausesFromStore.filter(c => c.likelihood && c.impact).length === 0 ? "Belum ada penyebab risiko yang dianalisis (memiliki Kemungkinan & Dampak)." : "Tidak ada penyebab risiko yang cocok dengan pencarian atau belum dianalisis."}
                 </p>
               ) : (
                 <>
                   <div className="flex items-center space-x-2 py-2 border-b">
                     <Checkbox
                       id="selectAllCausesForMonitoring"
-                      checked={selectedRiskCauseIds?.length === filteredRiskCauses.length && filteredRiskCauses.length > 0}
+                      checked={selectedRiskCauseIds?.length === sortedFilteredRiskCauses.length && sortedFilteredRiskCauses.length > 0}
                       onCheckedChange={(checked) => handleToggleSelectAllCauses(Boolean(checked))}
                       disabled={isSaving}
                     />
                     <Label htmlFor="selectAllCausesForMonitoring" className="text-sm font-medium">
-                      Pilih Semua yang Terlihat ({selectedRiskCauseIds?.length || 0} / {filteredRiskCauses.length} dipilih)
+                      Pilih Semua yang Terlihat ({selectedRiskCauseIds?.length || 0} / {sortedFilteredRiskCauses.length} dipilih)
                     </Label>
                   </div>
                   <ScrollArea className="h-[300px] border rounded-md">
@@ -283,12 +397,28 @@ export default function NewMonitoringSessionPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[50px]"></TableHead>
-                          <TableHead>Kode</TableHead>
-                          <TableHead>Deskripsi Penyebab Risiko</TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => requestSort('riskCauseCode')}
+                          >
+                            Kode <SortIndicator columnKey="riskCauseCode" />
+                          </TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => requestSort('description')}
+                          >
+                            Deskripsi Penyebab Risiko <SortIndicator columnKey="description" />
+                          </TableHead>
+                           <TableHead 
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => requestSort('riskLevelScore')}
+                          >
+                            Tingkat Risiko <SortIndicator columnKey="riskLevelScore" />
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredRiskCauses.map((cause) => (
+                        {sortedFilteredRiskCauses.map((cause) => (
                           <TableRow key={cause.id}>
                             <TableCell>
                               <Controller
@@ -310,8 +440,13 @@ export default function NewMonitoringSessionPage() {
                                 )}
                               />
                             </TableCell>
-                            <TableCell className="font-mono text-xs">{cause.riskCauseCode || `${cause.potentialRiskCode || 'PR?'}.PC${cause.sequenceNumber}`}</TableCell>
-                            <TableCell className="text-xs">{cause.description}</TableCell>
+                            <TableCell className="font-mono text-xs">{cause.riskCauseCode}</TableCell>
+                            <TableCell className="text-xs max-w-xs truncate" title={cause.description}>{cause.description}</TableCell>
+                            <TableCell>
+                                <Badge className={`${getRiskLevelColor(cause.riskLevelData.level)} text-xs`}>
+                                    {cause.riskLevelData.level === 'N/A' ? 'N/A' : `${cause.riskLevelData.level} (${cause.riskLevelData.score || 'N/A'})`}
+                                </Badge>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -323,7 +458,7 @@ export default function NewMonitoringSessionPage() {
           </Card>
         </div>
         <div className="flex justify-end mt-6">
-          <Button type="submit" disabled={isSaving || store.riskCausesLoading}>
+          <Button type="submit" disabled={isSaving || isLoadingInitialData || sortedFilteredRiskCauses.length === 0}>
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Simpan & Mulai Sesi Pemantauan
           </Button>
@@ -332,3 +467,4 @@ export default function NewMonitoringSessionPage() {
     </div>
   );
 }
+
