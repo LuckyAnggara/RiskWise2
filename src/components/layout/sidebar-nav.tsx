@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns } from "lucide-react"; // Added Columns
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns, FileArchive } from "lucide-react"; // Added Columns, FileArchive
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -33,12 +33,17 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck, disabled: profileIncomplete },
     { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity, disabled: profileIncomplete },
     { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns, disabled: profileIncomplete },
+    { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive, disabled: profileIncomplete },
     { label: "Pengaturan", href: "/settings", icon: Cog, disabled: false }, 
   ];
   
   const isActive = (navHref: string) => {
     if (navHref === "/") {
       return pathname === "/";
+    }
+    // Untuk /risk-document, pastikan exact match atau startsWith jika ada sub-halaman
+    if (navHref === "/risk-document") {
+        return pathname === navHref || pathname.startsWith(navHref + "/");
     }
     return pathname.startsWith(navHref);
   };
@@ -72,3 +77,5 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     </SidebarMenu>
   );
 }
+
+    

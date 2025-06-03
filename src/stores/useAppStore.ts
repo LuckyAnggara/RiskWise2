@@ -161,17 +161,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     
     const uniquePeriodIdentifier = `${currentId}|${currentP}`;
-    if (get().dataFetchedForPeriod === uniquePeriodIdentifier && !get().goalsLoading) { 
-      console.log(`[AppStore] Data for ${uniquePeriodIdentifier} already fetched or being fetched. Skipping.`);
-      return;
-    }
+    // Pengecekan get().dataFetchedForPeriod akan dilakukan di dalam setAppContext atau fetchGoals
+    // Untuk menghindari re-fetch berlebihan jika data sudah ada dan sesuai konteks.
+    // Namun, jika trigger dipanggil secara eksplisit, kita anggap pengguna ingin refresh (atau data memang belum ada).
+    
     console.log(`[AppStore] Triggering global data fetch for ${uniquePeriodIdentifier}`);
     set({ 
       currentUserId: currentId, 
       currentPeriod: currentP,
-      dataFetchedForPeriod: uniquePeriodIdentifier, 
+      dataFetchedForPeriod: uniquePeriodIdentifier, // Tandai bahwa fetch untuk konteks ini dimulai
       goalsLoading: true, 
-      potentialRisksLoading: true, 
+      potentialRisksLoading: true, // Set semua ke true karena ini fetch global
       riskCausesLoading: true, 
       controlMeasuresLoading: true,
       monitoringSessionsLoading: true, 
@@ -179,11 +179,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       monitoredControlMeasuresLoading: true,
     });
     try {
-      await get().fetchGoals(currentId, currentP);
-      // fetchMonitoringSessions is now called after fetchGoals completes
+      // Urutan fetch: Sasaran -> Potensi Risiko -> Penyebab Risiko -> Pengendalian.
+      // Sesi & data terkaitnya bisa paralel setelah Sasaran.
+      await get().fetchGoals(currentId, currentP); 
+      // fetchPotentialRisks, fetchRiskCauses, fetchControlMeasures akan dipanggil berantai dari dalam fetchGoals
+      // await get().fetchMonitoringSessions(currentId, currentP); // Fetch monitoring sessions juga bisa dipicu setelah goals.
+      console.log(`[AppStore] Global data fetch sequence initiated for ${uniquePeriodIdentifier}.`);
     } catch (error) {
-      console.error("[AppStore] Error during triggerGlobalDataFetch -> fetchGoals:", error);
-      set({ dataFetchedForPeriod: null }); 
+      console.error("[AppStore] Error during triggerGlobalDataFetch main sequence:", error);
+      set({ dataFetchedForPeriod: null }); // Reset jika ada error di tahap awal
     }
   },
 
@@ -220,18 +224,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         const sortedGoals = result.goals.sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }));
         set({ goals: sortedGoals, goalsLoading: false });
         console.log(`[AppStore] Goals fetched successfully: ${sortedGoals.length} items. Triggering dependent fetches.`);
-        await get().fetchPotentialRisks(userId, period); // This will chain to causes, then controls
-        await get().fetchMonitoringSessions(userId, period); // Fetch monitoring sessions after goals
+        // Chain fetches for dependent data
+        await get().fetchPotentialRisks(userId, period);
+        await get().fetchMonitoringSessions(userId, period); // Also fetch monitoring sessions
       } else {
         console.warn(`[AppStore] fetchGoals: Failed to fetch or no goals. Message: ${result.message}`);
         set({ goals: [], goalsLoading: false, dataFetchedForPeriod: null }); 
-        set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false, riskExposuresLoading: false, monitoredControlMeasuresLoading: false });
+        // If goals fail, stop subsequent loading for this context
+        set({ 
+          potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false,
+          monitoringSessionsLoading: false, riskExposuresLoading: false, monitoredControlMeasuresLoading: false 
+        });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in fetchGoals:", errorMessage);
       set({ goals: [], goalsLoading: false, dataFetchedForPeriod: null });
-      set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false, riskExposuresLoading: false, monitoredControlMeasuresLoading: false });
+      set({ 
+        potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false,
+        monitoringSessionsLoading: false, riskExposuresLoading: false, monitoredControlMeasuresLoading: false 
+      });
       throw new Error(`Gagal memuat daftar sasaran dari store: ${errorMessage}`);
     }
   },
@@ -286,8 +298,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const existingGoal = get().goals.find(g => g.id === goalId && g.userId === userId && g.period === period);
     if (existingGoal) return existingGoal;
     try {
-      const goalFromService = await getGoalsFromService(userId, period).then(res => res.goals?.find(g => g.id === goalId));
-      return goalFromService || null;
+      // Fallback to service if not in store (should ideally be there if fetchGoals ran for this context)
+      const goalsResult = await getGoalsFromService(userId, period);
+      if (goalsResult.success && goalsResult.goals) {
+          const goalFromService = goalsResult.goals.find(g => g.id === goalId);
+          if(goalFromService) set(state => ({ goals: Array.from(new Set([...state.goals, goalFromService]))})); // Add to store if found
+          return goalFromService || null;
+      }
+      return null;
     } catch (error) {
       console.error(`[AppStore] Error in getGoalById from service for ${goalId}:`, error);
       return null;
@@ -300,17 +318,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ potentialRisksLoading: true });
     try {
       const currentGoals = get().goals; 
-      if (currentGoals.length === 0) {
-        console.log("[AppStore] No goals found, skipping potential risk fetch.");
+      if (currentGoals.length === 0 && !get().goalsLoading) { // Ensure goals aren't just still loading
+        console.log("[AppStore] No goals found or goals still loading, skipping potential risk fetch.");
         set({ potentialRisks: [], potentialRisksLoading: false });
-        await get().fetchRiskCauses(userId, period); 
+        await get().fetchRiskCauses(userId, period); // Proceed to next fetch in chain
         return;
       }
       
       let allPRs: PotentialRisk[] = [];
       for (const goal of currentGoals) {
-        const prs = await getPotentialRisksByGoalIdFromService(goal.id, userId, period);
-        allPRs.push(...prs);
+        if (goal.userId === userId && goal.period === period) { // Ensure goal matches context
+          const prs = await getPotentialRisksByGoalIdFromService(goal.id, userId, period);
+          allPRs.push(...prs);
+        }
       }
       const sortedPRs = allPRs.sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
       set({ potentialRisks: sortedPRs, potentialRisksLoading: false });
@@ -389,16 +409,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ riskCausesLoading: true });
     try {
       const currentPRs = get().potentialRisks;
-      if (currentPRs.length === 0) {
-        console.log("[AppStore] No potential risks found, skipping risk cause fetch.");
+      if (currentPRs.length === 0 && !get().potentialRisksLoading) {
+        console.log("[AppStore] No potential risks found or PRs still loading, skipping risk cause fetch.");
         set({ riskCauses: [], riskCausesLoading: false });
         await get().fetchControlMeasures(userId, period); 
         return;
       }
       let allRCs: RiskCause[] = [];
       for (const pr of currentPRs) {
-        const rcs = await getRiskCausesByPotentialRiskIdFromService(pr.id, userId, period);
-        allRCs.push(...rcs);
+        if (pr.userId === userId && pr.period === period) { // Ensure PR matches context
+          const rcs = await getRiskCausesByPotentialRiskIdFromService(pr.id, userId, period);
+          allRCs.push(...rcs);
+        }
       }
       const sortedRCs = allRCs.sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
       set({ riskCauses: sortedRCs, riskCausesLoading: false });
@@ -475,34 +497,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ controlMeasuresLoading: true });
     try {
       let allCMs: ControlMeasure[] = [];
-      if (riskCauseId_optional) {
+      if (riskCauseId_optional) { // Fetch for a specific risk cause
         allCMs = await fetchControlMeasuresByRiskCauseIdFromService(riskCauseId_optional, userId, period);
         set(state => ({
           controlMeasures: [ 
-            ...state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional),
-            ...allCMs
+            ...state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional), // Remove old for this RC
+            ...allCMs // Add new for this RC
           ].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`)),
         }));
-      } else {
+      } else { // Fetch for all risk causes in the current context
         const currentRCs = get().riskCauses;
-        if (currentRCs.length === 0) {
-          console.log("[AppStore] No risk causes found, skipping control measure fetch.");
+        if (currentRCs.length === 0 && !get().riskCausesLoading) {
+          console.log("[AppStore] No risk causes found or RCs still loading, skipping control measure fetch for all.");
           set({ controlMeasures: [] });
         } else {
           for (const rc of currentRCs) {
-            const cms = await fetchControlMeasuresByRiskCauseIdFromService(rc.id, userId, period);
-            allCMs.push(...cms);
+            if (rc.userId === userId && rc.period === period) { // Ensure RC matches context
+              const cms = await fetchControlMeasuresByRiskCauseIdFromService(rc.id, userId, period);
+              allCMs.push(...cms);
+            }
           }
           const sortedCMs = allCMs.sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`));
           set({ controlMeasures: sortedCMs });
         }
       }
-      set({ controlMeasuresLoading: false }); // Ensure loading is false after operations
-      console.log(`[AppStore] ControlMeasures fetched: ${allCMs.length}.`);
+      set({ controlMeasuresLoading: false });
+      console.log(`[AppStore] ControlMeasures fetched: ${allCMs.length}. Global data fetch for ${userId}|${period} should now be complete.`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in fetchControlMeasures:", errorMessage);
-      set({ controlMeasures: [], controlMeasuresLoading: false, dataFetchedForPeriod: null }); // Reset dataFetchedForPeriod on error
+      set({ controlMeasures: [], controlMeasuresLoading: false, dataFetchedForPeriod: null }); 
       throw new Error(`Gagal memuat tindakan pengendalian dari store: ${errorMessage}`);
     }
   },
@@ -573,7 +597,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[AppStore] Error in fetchMonitoringSessions:", errorMessage);
-      set({ monitoringSessions: [], monitoringSessionsLoading: false }); // Don't reset dataFetchedForPeriod here
+      set({ monitoringSessions: [], monitoringSessionsLoading: false });
       throw new Error(`Gagal memuat sesi pemantauan dari store: ${errorMessage}`);
     }
   },
@@ -751,3 +775,5 @@ export const triggerGlobalDataFetch = (userId: string | null, period: string | n
     store.resetAllData();
   }
 };
+
+    
