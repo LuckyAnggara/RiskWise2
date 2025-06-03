@@ -7,9 +7,9 @@ import { ComprehensiveReportTreeItem } from './comprehensive-report-tree-item';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface ComprehensiveReportTreeProps {
-  goals: Goal[];
+  goals: Goal[]; // Goals are now passed directly, already filtered by period and user
   userId: string;
-  period: string;
+  period: string; // This should be the selectedPeriodForReport from the parent
 }
 
 export function ComprehensiveReportTree({ goals, userId, period }: ComprehensiveReportTreeProps) {
@@ -17,11 +17,11 @@ export function ComprehensiveReportTree({ goals, userId, period }: Comprehensive
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Laporan Hierarki</CardTitle>
+          <CardTitle>Laporan Hierarki Risiko</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Tidak ada sasaran untuk ditampilkan pada periode dan UPR yang dipilih.
+            Tidak ada data sasaran untuk periode {period} yang dipilih atau tidak ada sasaran yang cocok.
           </p>
         </CardContent>
       </Card>
@@ -29,18 +29,22 @@ export function ComprehensiveReportTree({ goals, userId, period }: Comprehensive
   }
 
   return (
-    <div className="space-y-3">
-      {goals.map(goal => (
-        <ComprehensiveReportTreeItem
-          key={goal.id}
-          item={goal}
-          itemType="goal"
-          level={0}
-          userId={userId}
-          period={period}
-        />
-      ))}
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Laporan Hierarki Risiko - Periode: {period}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {goals.map(goal => (
+          <ComprehensiveReportTreeItem
+            key={goal.id}
+            item={goal}
+            itemType="goal"
+            level={0}
+            userId={userId} // Pass down from props
+            period={period} // Pass down from props
+          />
+        ))}
+      </CardContent>
+    </Card>
   );
 }
-    
