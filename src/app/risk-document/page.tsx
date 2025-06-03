@@ -9,27 +9,74 @@ import { Label } from '@/components/ui/label';
 import { Loader2, ListTree, TableIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
+import type { Goal, PotentialRisk, RiskCause, ControlMeasure, RiskCategory, RiskSource, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory, ControlMeasureTypeKey } from '@/lib/types';
+import { getCalculatedRiskLevel, getControlTypeName } from '@/lib/types';
 import { ComprehensiveReportTree } from '@/components/risks/comprehensive-report-tree';
-import type { Goal } from '@/lib/types';
+import { ComprehensiveReportTable } from '@/components/risks/comprehensive-report-table'; // Komponen baru
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from '@/hooks/use-toast';
+
+export interface FlatReportItem {
+  goalCode?: string;
+  goalName?: string;
+  goalDescription?: string;
+
+  potentialRiskCode?: string;
+  potentialRiskSequenceNumber?: number;
+  potentialRiskDescription?: string;
+  potentialRiskCategory?: RiskCategory | null;
+  potentialRiskOwner?: string | null;
+
+  riskCauseCode?: string;
+  riskCauseSequenceNumber?: number;
+  riskCauseDescription?: string;
+  riskCauseSource?: RiskSource;
+  riskCauseKRI?: string | null;
+  riskCauseTolerance?: string | null;
+  riskCauseLikelihood?: LikelihoodLevelDesc | null;
+  riskCauseImpact?: ImpactLevelDesc | null;
+  riskCauseLevel?: CalculatedRiskLevelCategory | 'N/A';
+  riskCauseScore?: number | null;
+
+  controlMeasureCode?: string;
+  controlMeasureSequenceNumber?: number;
+  controlMeasureDescription?: string;
+  controlMeasureType?: ControlMeasureTypeKey | null;
+  controlMeasureTypeName?: string | null;
+  controlMeasureKCI?: string | null;
+  controlMeasureTarget?: string | null;
+  controlMeasurePIC?: string | null;
+  controlMeasureDeadline?: string | null;
+  controlMeasureBudget?: number | null;
+}
+
 
 export default function ComprehensiveReportPage() {
   const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   
-  const goalsFromStore = useAppStore(state => state.goals);
-  const goalsLoadingFromStore = useAppStore(state => state.goalsLoading); // Initial loading of goals for the *selected* period
-  const triggerGlobalDataFetch = useAppStore(state => state.triggerGlobalDataFetch);
-  const storeDataFetchedForPeriod = useAppStore(state => state.dataFetchedForPeriod);
+  const store = useAppStore();
+  const { 
+    goals: goalsFromStore, 
+    potentialRisks: potentialRisksFromStore,
+    riskCauses: riskCausesFromStore,
+    controlMeasures: controlMeasuresFromStore,
+    goalsLoading: goalsLoadingFromStore,
+    potentialRisksLoading: potentialRisksLoadingFromStore,
+    riskCausesLoading: riskCausesLoadingFromStore,
+    controlMeasuresLoading: controlMeasuresLoadingFromStore,
+    triggerGlobalDataFetch,
+    dataFetchedForPeriod: storeDataFetchedForPeriod
+  } = store;
 
   const [selectedPeriodForReport, setSelectedPeriodForReport] = useState<string | null>(null);
   const [selectedViewMode, setSelectedViewMode] = useState<'tree' | 'table'>('tree');
   const [reportSubmitted, setReportSubmitted] = useState<boolean>(false);
-  const [isLoadingReport, setIsLoadingReport] = useState<boolean>(false); // Loading specifically after "Show Report" is clicked
+  const [isLoadingReportData, setIsLoadingReportData] = useState<boolean>(false);
+  const [flatTableData, setFlatTableData] = useState<FlatReportItem[]>([]);
   
   const currentUserId = useMemo(() => appUser?.uid, [appUser]);
   const availablePeriods = useMemo(() => appUser?.availablePeriods || [], [appUser]);
@@ -41,23 +88,134 @@ export default function ComprehensiveReportPage() {
     }
   }, [authLoading, currentUser, appUser, activePeriodFromAuth, selectedPeriodForReport]);
   
-  // Effect to set isLoadingReport to false once goals for the selected period are loaded (or failed to load)
-  useEffect(() => {
-    if (reportSubmitted && !goalsLoadingFromStore) {
-        // Check if dataFetchedForPeriod matches the one we requested
-        if (currentUserId && selectedPeriodForReport && storeDataFetchedForPeriod === `${currentUserId}|${selectedPeriodForReport}`) {
-            setIsLoadingReport(false);
-            console.log(`[CompReportPage] Report loading finished for ${currentUserId}|${selectedPeriodForReport}. Goals loaded: ${goalsFromStore.filter(g => g.period === selectedPeriodForReport).length}`);
-        } else if (currentUserId && selectedPeriodForReport && storeDataFetchedForPeriod !== null && storeDataFetchedForPeriod !== `${currentUserId}|${selectedPeriodForReport}`) {
-            // This means a fetch for a *different* period completed. We are still waiting for ours.
-            console.log(`[CompReportPage] Goals for a different period loaded (${storeDataFetchedForPeriod}). Waiting for ${currentUserId}|${selectedPeriodForReport}.`);
-        } else if (currentUserId && selectedPeriodForReport && storeDataFetchedForPeriod === null && !goalsLoadingFromStore){
-            // Fetch completed, but dataFetchedForPeriod not set (could be error in fetchGoals)
-            setIsLoadingReport(false);
-            console.warn(`[CompReportPage] Report loading finished for ${currentUserId}|${selectedPeriodForReport}, but dataFetchedForPeriod is null. Check for fetch errors.`);
+  const processDataForTable = () => {
+    if (!selectedPeriodForReport || !currentUserId) return [];
+    
+    const processedData: FlatReportItem[] = [];
+    const relevantGoals = goalsFromStore.filter(g => g.userId === currentUserId && g.period === selectedPeriodForReport);
+
+    relevantGoals.forEach(goal => {
+      const relevantPRs = potentialRisksFromStore.filter(pr => pr.goalId === goal.id && pr.userId === currentUserId && pr.period === selectedPeriodForReport);
+      if (relevantPRs.length === 0) {
+        processedData.push({
+          goalCode: goal.code,
+          goalName: goal.name,
+          goalDescription: goal.description,
+        });
+        return;
+      }
+
+      relevantPRs.forEach(pr => {
+        const relevantRCs = riskCausesFromStore.filter(rc => rc.potentialRiskId === pr.id && rc.userId === currentUserId && rc.period === selectedPeriodForReport);
+        const prCode = `${goal.code || 'S?'}.PR${pr.sequenceNumber || '?'}`;
+        if (relevantRCs.length === 0) {
+          processedData.push({
+            goalCode: goal.code,
+            goalName: goal.name,
+            goalDescription: goal.description,
+            potentialRiskCode: prCode,
+            potentialRiskSequenceNumber: pr.sequenceNumber,
+            potentialRiskDescription: pr.description,
+            potentialRiskCategory: pr.category,
+            potentialRiskOwner: pr.owner,
+          });
+          return;
         }
+
+        relevantRCs.forEach(rc => {
+          const { level: rcLevel, score: rcScore } = getCalculatedRiskLevel(rc.likelihood, rc.impact);
+          const rcCode = `${prCode}.PC${rc.sequenceNumber || '?'}`;
+          const relevantCMs = controlMeasuresFromStore.filter(cm => cm.riskCauseId === rc.id && cm.userId === currentUserId && cm.period === selectedPeriodForReport);
+
+          if (relevantCMs.length === 0) {
+            processedData.push({
+              goalCode: goal.code,
+              goalName: goal.name,
+              goalDescription: goal.description,
+              potentialRiskCode: prCode,
+              potentialRiskSequenceNumber: pr.sequenceNumber,
+              potentialRiskDescription: pr.description,
+              potentialRiskCategory: pr.category,
+              potentialRiskOwner: pr.owner,
+              riskCauseCode: rcCode,
+              riskCauseSequenceNumber: rc.sequenceNumber,
+              riskCauseDescription: rc.description,
+              riskCauseSource: rc.source,
+              riskCauseKRI: rc.keyRiskIndicator,
+              riskCauseTolerance: rc.riskTolerance,
+              riskCauseLikelihood: rc.likelihood,
+              riskCauseImpact: rc.impact,
+              riskCauseLevel: rcLevel,
+              riskCauseScore: rcScore,
+            });
+            return;
+          }
+
+          relevantCMs.forEach(cm => {
+            const cmCode = `${rcCode}.${cm.controlType}.${cm.sequenceNumber || '?'}`;
+            processedData.push({
+              goalCode: goal.code,
+              goalName: goal.name,
+              goalDescription: goal.description,
+              potentialRiskCode: prCode,
+              potentialRiskSequenceNumber: pr.sequenceNumber,
+              potentialRiskDescription: pr.description,
+              potentialRiskCategory: pr.category,
+              potentialRiskOwner: pr.owner,
+              riskCauseCode: rcCode,
+              riskCauseSequenceNumber: rc.sequenceNumber,
+              riskCauseDescription: rc.description,
+              riskCauseSource: rc.source,
+              riskCauseKRI: rc.keyRiskIndicator,
+              riskCauseTolerance: rc.riskTolerance,
+              riskCauseLikelihood: rc.likelihood,
+              riskCauseImpact: rc.impact,
+              riskCauseLevel: rcLevel,
+              riskCauseScore: rcScore,
+              controlMeasureCode: cmCode,
+              controlMeasureSequenceNumber: cm.sequenceNumber,
+              controlMeasureDescription: cm.description,
+              controlMeasureType: cm.controlType,
+              controlMeasureTypeName: getControlTypeName(cm.controlType),
+              controlMeasureKCI: cm.keyControlIndicator,
+              controlMeasureTarget: cm.target,
+              controlMeasurePIC: cm.responsiblePerson,
+              controlMeasureDeadline: cm.deadline,
+              controlMeasureBudget: cm.budget,
+            });
+          });
+        });
+      });
+    });
+    return processedData;
+  };
+
+  useEffect(() => {
+    if (reportSubmitted && currentUserId && selectedPeriodForReport) {
+      const uniqueId = `${currentUserId}|${selectedPeriodForReport}`;
+      const allDataLoaded = !goalsLoadingFromStore && !potentialRisksLoadingFromStore && !riskCausesLoadingFromStore && !controlMeasuresLoadingFromStore;
+      
+      if (storeDataFetchedForPeriod === uniqueId && allDataLoaded) {
+        if (selectedViewMode === 'table') {
+          console.log(`[CompReportPage] Processing data for table view for ${uniqueId}`);
+          const processedData = processDataForTable();
+          setFlatTableData(processedData);
+        }
+        setIsLoadingReportData(false);
+        console.log(`[CompReportPage] Report data ready for ${uniqueId}.`);
+      } else if (storeDataFetchedForPeriod !== uniqueId && !isLoadingReportData) {
+        // This case might happen if user changes period *after* submitting a report for a different period.
+        // The triggerGlobalDataFetch should handle this if handleShowReport is called again.
+        console.log(`[CompReportPage] Data fetched for ${storeDataFetchedForPeriod}, but report is for ${uniqueId}. Waiting for correct data.`);
+        // Data might still be loading if triggerGlobalDataFetch was just called.
+      }
     }
-  }, [reportSubmitted, goalsLoadingFromStore, currentUserId, selectedPeriodForReport, storeDataFetchedForPeriod, goalsFromStore]);
+  }, [
+    reportSubmitted, currentUserId, selectedPeriodForReport, selectedViewMode,
+    storeDataFetchedForPeriod, goalsLoadingFromStore, potentialRisksLoadingFromStore, 
+    riskCausesLoadingFromStore, controlMeasuresLoadingFromStore,
+    goalsFromStore, potentialRisksFromStore, riskCausesFromStore, controlMeasuresFromStore // Added dependencies for processDataForTable
+  ]);
 
 
   const handleShowReport = async () => {
@@ -71,18 +229,19 @@ export default function ComprehensiveReportPage() {
     }
     console.log(`[CompReportPage] handleShowReport: Period=${selectedPeriodForReport}, Mode=${selectedViewMode}`);
     setReportSubmitted(true);
-    setIsLoadingReport(true);
-    // Trigger fetch for the *selected* period. 
-    // The useEffect above will monitor goalsLoadingFromStore for this specific context.
+    setIsLoadingReportData(true);
+    setFlatTableData([]); // Clear previous table data
+
     try {
+        // Always trigger fetch; store will manage if data for this context is already loaded
         await triggerGlobalDataFetch(currentUserId, selectedPeriodForReport);
-        // isLoadingReport will be set to false by the useEffect when goalsLoadingFromStore becomes false
-        // for the context of currentUserId and selectedPeriodForReport
+        // The useEffect above will handle setting isLoadingReportData to false 
+        // and processing table data once all necessary store data is loaded.
     } catch (error) {
         console.error("[CompReportPage] Error triggering global data fetch:", error);
         toast({ title: "Gagal Memuat Data", description: "Terjadi kesalahan saat memulai pengambilan data laporan.", variant: "destructive"});
-        setIsLoadingReport(false);
-        setReportSubmitted(false); // Allow user to try again
+        setIsLoadingReportData(false);
+        setReportSubmitted(false);
     }
   };
   
@@ -90,7 +249,6 @@ export default function ComprehensiveReportPage() {
     if (!selectedPeriodForReport || !currentUserId) return [];
     return goalsFromStore.filter(g => g.userId === currentUserId && g.period === selectedPeriodForReport);
   }, [goalsFromStore, selectedPeriodForReport, currentUserId]);
-
 
   if (authLoading || (currentUser && !appUser) ) {
     return (
@@ -132,7 +290,7 @@ export default function ComprehensiveReportPage() {
                     <Select 
                         value={selectedPeriodForReport || ""} 
                         onValueChange={setSelectedPeriodForReport}
-                        disabled={availablePeriods.length === 0 || isLoadingReport}
+                        disabled={availablePeriods.length === 0 || isLoadingReportData}
                     >
                         <SelectTrigger id="reportPeriod" className="w-full">
                         <SelectValue placeholder="Pilih periode laporan" />
@@ -153,28 +311,28 @@ export default function ComprehensiveReportPage() {
                     <Label>Mode Tampilan</Label>
                     <Tabs value={selectedViewMode} onValueChange={(value) => setSelectedViewMode(value as 'tree' | 'table')}>
                         <TabsList className="grid w-full grid-cols-2 h-auto">
-                            <TabsTrigger value="tree" disabled={isLoadingReport} className="py-2 text-xs sm:text-sm"><ListTree className="mr-1 sm:mr-2 h-4 w-4" />Hierarki</TabsTrigger>
-                            <TabsTrigger value="table" disabled={isLoadingReport} className="py-2 text-xs sm:text-sm"><TableIcon className="mr-1 sm:mr-2 h-4 w-4" />Tabel Datar</TabsTrigger>
+                            <TabsTrigger value="tree" disabled={isLoadingReportData} className="py-2 text-xs sm:text-sm"><ListTree className="mr-1 sm:mr-2 h-4 w-4" />Hierarki</TabsTrigger>
+                            <TabsTrigger value="table" disabled={isLoadingReportData} className="py-2 text-xs sm:text-sm"><TableIcon className="mr-1 sm:mr-2 h-4 w-4" />Tabel Datar</TabsTrigger>
                         </TabsList>
                     </Tabs>
                 </div>
                 
-                <Button onClick={handleShowReport} disabled={!selectedPeriodForReport || isLoadingReport} className="w-full md:w-auto">
-                    {isLoadingReport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                <Button onClick={handleShowReport} disabled={!selectedPeriodForReport || isLoadingReportData} className="w-full md:w-auto">
+                    {isLoadingReportData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Tampilkan Laporan
                 </Button>
             </div>
         </CardContent>
       </Card>
 
-      {reportSubmitted && isLoadingReport && (
+      {reportSubmitted && isLoadingReportData && (
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 className="h-10 w-10 animate-spin text-primary mb-3" />
           <p className="text-muted-foreground">Memuat data laporan untuk periode {selectedPeriodForReport}...</p>
         </div>
       )}
 
-      {reportSubmitted && !isLoadingReport && selectedPeriodForReport && currentUserId && (
+      {reportSubmitted && !isLoadingReportData && selectedPeriodForReport && currentUserId && (
         <>
           {selectedViewMode === 'tree' && (
             <ComprehensiveReportTree 
@@ -184,18 +342,16 @@ export default function ComprehensiveReportPage() {
             />
           )}
           {selectedViewMode === 'table' && (
-            <Card>
-              <CardHeader><CardTitle>Mode Tabel Datar</CardTitle></CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground text-center py-10">
-                  Mode Tabel Datar sedang dalam pengembangan dan akan tersedia segera.
-                </p>
-              </CardContent>
-            </Card>
+             <ComprehensiveReportTable data={flatTableData} period={selectedPeriodForReport} />
           )}
-           {!isLoadingReport && goalsForSelectedPeriod.length === 0 && (
+           {!isLoadingReportData && goalsForSelectedPeriod.length === 0 && selectedViewMode === 'tree' && (
              <div className="text-center py-10 border-2 border-dashed border-muted-foreground/30 rounded-lg">
-              <p className="text-muted-foreground">Tidak ada data sasaran ditemukan untuk periode {selectedPeriodForReport} pada UPR ini.</p>
+              <p className="text-muted-foreground">Tidak ada data sasaran ditemukan untuk periode {selectedPeriodForReport} pada UPR ini untuk ditampilkan dalam mode hierarki.</p>
+            </div>
+           )}
+           {!isLoadingReportData && flatTableData.length === 0 && selectedViewMode === 'table' && (
+             <div className="text-center py-10 border-2 border-dashed border-muted-foreground/30 rounded-lg">
+              <p className="text-muted-foreground">Tidak ada data yang dapat ditampilkan dalam mode tabel datar untuk periode {selectedPeriodForReport} pada UPR ini, atau semua data belum termuat sepenuhnya.</p>
             </div>
            )}
         </>

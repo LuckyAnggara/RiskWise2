@@ -2,12 +2,12 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import type { Goal, PotentialRisk, RiskCause, ControlMeasure } from '@/lib/types';
+import type { Goal, PotentialRisk, RiskCause, ControlMeasure, CalculatedRiskLevelCategory } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Loader2, ChevronDown, ChevronRight, Target, ShieldAlert, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { Badge } from '@/components/ui/badge';
-import { getControlTypeName } from '@/lib/types';
+import { getControlTypeName, getCalculatedRiskLevel, getRiskLevelColor } from '@/lib/types';
 
 type ReportItem = Goal | PotentialRisk | RiskCause | ControlMeasure;
 type ItemType = 'goal' | 'potentialRisk' | 'riskCause' | 'controlMeasure';
@@ -18,54 +18,59 @@ interface ComprehensiveReportTreeItemProps {
   level: number;
   userId: string;
   period: string;
+  parentGoalCode?: string; // Pass down from parent
+  parentPotentialRiskCode?: string; // Pass down from parent
 }
 
-export function ComprehensiveReportTreeItem({ item, itemType, level, userId, period }: ComprehensiveReportTreeItemProps) {
+export function ComprehensiveReportTreeItem({ 
+  item, 
+  itemType, 
+  level, 
+  userId, 
+  period,
+  parentGoalCode,
+  parentPotentialRiskCode 
+}: ComprehensiveReportTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoadingChildren, setIsLoadingChildren] = useState(false);
   const [children, setChildren] = useState<ReportItem[]>([]);
   const [childrenType, setChildrenType] = useState<ItemType | null>(null);
 
-  // Mengambil fungsi fetch dari store
-  const fetchPotentialRisksForGoal = useAppStore(state => state.getPotentialRiskById); // Ini salah, harusnya get by goalId
-  const getPotentialRisksByGoalIdFromStore = useAppStore(state => state.potentialRisks); // asumsikan ini array
-  const fetchRiskCausesForPotentialRisk = useAppStore(state => state.getRiskCauseById); // Ini salah, harusnya get by PR Id
-  const getRiskCausesByPRIdFromStore = useAppStore(state => state.riskCauses); // asumsikan ini array
-  const fetchControlMeasuresForRiskCause = useAppStore(state => state.getControlMeasureById); // Ini salah, harusnya get by RC Id
-  const getControlMeasuresByRCIdFromStore = useAppStore(state => state.controlMeasures); // asumsikan ini array
-
+  const potentialRisksFromStore = useAppStore(state => state.potentialRisks);
+  const riskCausesFromStore = useAppStore(state => state.riskCauses);
+  const controlMeasuresFromStore = useAppStore(state => state.controlMeasures);
 
   const loadChildren = async () => {
-    if (isLoadingChildren || (children.length > 0 && isExpanded)) return; // Don't load if already loading or children loaded
+    if (isLoadingChildren || (children.length > 0 && isExpanded)) return;
 
     setIsLoadingChildren(true);
     let fetchedChildren: ReportItem[] = [];
     let nextItemType: ItemType | null = null;
 
     try {
+      // Simulate async fetch delay for demonstration if needed
+      // await new Promise(resolve => setTimeout(resolve, 500));
+
       switch (itemType) {
         case 'goal':
-          // Ambil semua PR untuk goal ini. Filter dari store.
-          const prsFromStore = getPotentialRisksByGoalIdFromStore.filter(
+          const prsForGoal = potentialRisksFromStore.filter(
             pr => pr.goalId === item.id && pr.userId === userId && pr.period === period
-          );
-          fetchedChildren = prsFromStore.sort((a,b) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0));
+          ).sort((a,b) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0));
+          fetchedChildren = prsForGoal;
           nextItemType = 'potentialRisk';
           break;
         case 'potentialRisk':
-          // Ambil semua RC untuk PR ini. Filter dari store.
-          const rcsFromStore = getRiskCausesByPRIdFromStore.filter(
+          const rcsForPR = riskCausesFromStore.filter(
             rc => rc.potentialRiskId === item.id && rc.userId === userId && rc.period === period
-          );
-          fetchedChildren = rcsFromStore.sort((a,b) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0));
+          ).sort((a,b) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0));
+          fetchedChildren = rcsForPR;
           nextItemType = 'riskCause';
           break;
         case 'riskCause':
-          // Ambil semua CM untuk RC ini. Filter dari store.
-          const cmsFromStore = getControlMeasuresByRCIdFromStore.filter(
+          const cmsForRC = controlMeasuresFromStore.filter(
             cm => cm.riskCauseId === item.id && cm.userId === userId && cm.period === period
-          );
-          fetchedChildren = cmsFromStore.sort((a,b) => (a.sequenceNumber || 0) - (b.sequenceNumber || 0));
+          ).sort((a,b) => (a.controlType.localeCompare(b.controlType) || (a.sequenceNumber || 0) - (b.sequenceNumber || 0)));
+          fetchedChildren = cmsForRC;
           nextItemType = 'controlMeasure';
           break;
         default:
@@ -75,7 +80,6 @@ export function ComprehensiveReportTreeItem({ item, itemType, level, userId, per
       setChildrenType(nextItemType);
     } catch (error) {
       console.error(`Error loading children for ${itemType} ${item.id}:`, error);
-      // Handle error (e.g., show toast)
     } finally {
       setIsLoadingChildren(false);
     }
@@ -105,38 +109,46 @@ export function ComprehensiveReportTreeItem({ item, itemType, level, userId, per
     switch (itemType) {
       case 'goal':
         const goal = item as Goal;
-        return <span className="font-semibold">{goal.code} - {goal.name}</span>;
+        return <span className="font-semibold">{goal.code || 'S?'} - {goal.name}</span>;
       case 'potentialRisk':
         const pr = item as PotentialRisk;
-        const goalCodeForPR = (item as any).parentGoalCode || 'S?'; // Assuming parentGoalCode is passed or derived
-        return `PR${pr.sequenceNumber || '?'}: ${pr.description} ${pr.category ? `(${pr.category})` : ''}`;
+        const prFullCode = `${parentGoalCode || 'S?'}.PR${pr.sequenceNumber || '?'}`;
+        return <>{prFullCode}: {pr.description} {pr.category && <Badge variant="outline" className="ml-2 text-xs">{pr.category}</Badge>}</>;
       case 'riskCause':
         const rc = item as RiskCause;
-        const prCodeForRC = (item as any).parentPotentialRiskCode || 'PR?';
-        return `PC${rc.sequenceNumber || '?'}: ${rc.description} (Sumber: ${rc.source})`;
+        const rcFullCode = `${parentPotentialRiskCode || 'PR?'}.PC${rc.sequenceNumber || '?'}`;
+        const { level: rcLevel, score: rcScore } = getCalculatedRiskLevel(rc.likelihood, rc.impact);
+        return (
+          <>
+            {rcFullCode}: {rc.description} (Sumber: <Badge variant="outline" className="text-xs">{rc.source}</Badge>)
+            {rcLevel !== 'N/A' && (
+              <Badge className={`${getRiskLevelColor(rcLevel)} text-xs ml-2`}>
+                {rcLevel} ({rcScore})
+              </Badge>
+            )}
+          </>
+        );
       case 'controlMeasure':
         const cm = item as ControlMeasure;
-        return `${cm.controlType}.${cm.sequenceNumber || '?'}: ${cm.description}`;
+        // Assuming parentRiskCauseCode is passed for CM or derived for full code.
+        // For simplicity here, just using its own type and sequence.
+        const cmCode = `${cm.controlType}.${cm.sequenceNumber || '?'}`;
+        return <>{cmCode}: {cm.description} <Badge variant="outline" className="ml-2 text-xs">{getControlTypeName(cm.controlType)}</Badge></>;
       default:
         return 'Unknown Item';
     }
   };
   
-  const getFullItemCode = () => {
-    // This is a simplified placeholder. A more robust solution would pass parent codes down.
-    switch (itemType) {
-      case 'goal': return (item as Goal).code;
-      case 'potentialRisk': return `PR${(item as PotentialRisk).sequenceNumber || '?'}`;
-      case 'riskCause': return `PC${(item as RiskCause).sequenceNumber || '?'}`;
-      case 'controlMeasure': return `${(item as ControlMeasure).controlType}.${(item as ControlMeasure).sequenceNumber || '?'}`;
-      default: return '';
-    }
-  }
+  const currentGoalCode = itemType === 'goal' ? (item as Goal).code : parentGoalCode;
+  const currentPotentialRiskCode = itemType === 'potentialRisk' 
+    ? `${currentGoalCode || 'S?'}.PR${(item as PotentialRisk).sequenceNumber || '?'}` 
+    : parentPotentialRiskCode;
+
 
   return (
     <div 
       className="border-l-2 border-muted-foreground/20 pl-2"
-      style={{ marginLeft: `${level * 1}rem` }} // Indent based on level
+      style={{ marginLeft: `${level * 1}rem` }}
     >
       <div className="flex items-center p-2 hover:bg-muted/50 rounded-md cursor-pointer group">
         {canExpand && (
@@ -157,16 +169,11 @@ export function ComprehensiveReportTreeItem({ item, itemType, level, userId, per
             )}
           </Button>
         )}
-        {!canExpand && <div className="w-7 mr-1 flex-shrink-0"></div> /* Placeholder for alignment */}
+        {!canExpand && <div className="w-7 mr-1 flex-shrink-0"></div>}
         
         {getIcon()}
         <div className="flex-grow text-sm" onClick={canExpand ? handleToggleExpand : undefined}>
           {getItemDisplay()}
-          {itemType === 'controlMeasure' && (
-            <Badge variant="outline" className="ml-2 text-xs">
-              {getControlTypeName((item as ControlMeasure).controlType)}
-            </Badge>
-          )}
         </div>
       </div>
       {isExpanded && children.length > 0 && childrenType && (
@@ -179,6 +186,8 @@ export function ComprehensiveReportTreeItem({ item, itemType, level, userId, per
               level={level + 1}
               userId={userId}
               period={period}
+              parentGoalCode={currentGoalCode}
+              parentPotentialRiskCode={currentPotentialRiskCode}
             />
           ))}
         </div>
@@ -189,5 +198,3 @@ export function ComprehensiveReportTreeItem({ item, itemType, level, userId, per
     </div>
   );
 }
-
-    
