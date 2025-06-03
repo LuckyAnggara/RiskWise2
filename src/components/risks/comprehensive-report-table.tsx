@@ -91,7 +91,7 @@ export function ComprehensiveReportTable({ data, period }: ComprehensiveReportTa
                     }
 
                     return (
-                      <TableCell key={`${rowIndex}-${col.accessor}`} className="text-xs whitespace-nowrap px-2 py-1.5 max-w-[200px] truncate" title={String(value || '')}>
+                      <TableCell key={`${rowIndex}-${col.accessor}`} className="text-xs whitespace-nowrap px-2 py-1.5" title={String(value || '')}>
                         {displayValue}
                       </TableCell>
                     );
