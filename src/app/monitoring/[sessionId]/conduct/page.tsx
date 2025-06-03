@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription,CardFooter } from '@/components/ui/card';
 import type { RiskCause, ControlMeasure, MonitoringSession, RiskExposure, MonitoredRiskCauseView, MonitoringSessionStatus, MonitoredControlMeasureData } from '@/lib/types';
-import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, Wand2, PlayCircle, UploadCloud, CornerRightDown, FileText, Search } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, AlertTriangle, CheckCircle2, FileUp, Info, PlayCircle, UploadCloud, CornerRightDown, FileText, Search } from 'lucide-react';
 import { getCalculatedRiskLevel, getRiskLevelColor, getControlTypeName } from  '@/lib/types';
 import { Separator } from '@/components/ui/separator';
 import { format, parseISO, isValid as isValidDate } from 'date-fns';
@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
 import { getMonitoringSessionById as getMonitoringSessionByIdFromService } from '@/services/monitoringService'; 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -31,13 +32,13 @@ import * as XLSX from 'xlsx';
 
 const parseToleranceValue = (toleranceText: string | null): number | null => {
     if (!toleranceText) return null;
-    const match = toleranceText.match(/(\d+)/);
-    return match ? parseInt(match[1], 10) : null;
+    const match = toleranceText.match(/(-?\d*\.?\d+)/); // Allow negative and decimal numbers
+    return match ? parseFloat(match[1]) : null;
 };
 
 const parseNumericValue = (text: string | null | undefined): number | null => {
   if (text === null || text === undefined || typeof text !== 'string') return null;
-  const cleanedText = text.replace(/[^0-9.,]/g, '').replace(',', '.'); 
+  const cleanedText = text.replace(/[^0-9.,-]/g, '').replace(',', '.'); 
   const num = parseFloat(cleanedText);
   return isNaN(num) ? null : num;
 };
@@ -54,20 +55,37 @@ const calculateControlPerformance = (
   
   if (targetValue === 0) {
     if (!isTargetNegative) { 
-      return realizationValue <= 0 ? 100 : (100 - (realizationValue * 100)); 
+      return realizationValue <= 0 ? 100 : (realizationValue > 0 ? Math.max(0, 100 - (realizationValue * 100)) : 0); 
     } else { 
-      return realizationValue === 0 ? 100 : 0; 
+      return realizationValue === 0 ? 100 : (realizationValue < 0 ? Math.max(0, 100 - (Math.abs(realizationValue) * 100)) : 0); 
     }
   }
 
   let performance: number;
   if (isTargetNegative) { 
-    performance = ((2 * targetValue) - realizationValue) / targetValue * 100;
+    // Target negatif: jika target -10, realisasi -5 (lebih baik), kinerja > 100.
+    // Jika realisasi -15 (lebih buruk), kinerja < 100.
+    // Jika target 10 (misal, target < 10), realisasi 5 (lebih baik), kinerja > 100.
+    // Realisasi 15 (lebih buruk), kinerja < 100.
+    // Rumus: 100 + ((Target - Realisasi) / ABS(Target)) * 100
+    // Jika Target > 0 (misal target < 10, jadi toleransi = 10), dan realisasi 5 -> 100 + ((10-5)/10)*100 = 150
+    // Jika realisasi 15 -> 100 + ((10-15)/10)*100 = 50
+    // Jika Target < 0 (misal target > -10, jadi toleransi = -10), dan realisasi -5 -> 100 + ((-10 - (-5))/10)*100 = 100 + (-5/10)*100 = 50 (SALAH, harusnya lebih baik)
+    // Revisi: Jika Target Negatif, artinya "semakin rendah semakin baik".
+    // Jika realisasi <= target, kinerja >= 100%. Jika realisasi > target, kinerja < 100%.
+    // Performance = ( (target - (realization - target) ) / abs(target) ) * 100 (jika target != 0)
+    // Atau, sederhananya: Jika target < 0 (misal -10), dan realisasi -5 (lebih tinggi, lebih buruk). Realisasi -15 (lebih rendah, lebih baik).
+    // Jika target > 0 (misal <10), dan realisasi 5 (lebih rendah, lebih baik). Realisasi 15 (lebih tinggi, lebih buruk).
+    // Kinerja = 100 - ( (Realisasi - Target) / ABS(Target) ) * 100 (jika target != 0)
+    // Jika realisasi = 5, target = 10 (negatif berarti target < 10): 100 - ((5-10)/10)*100 = 100 - (-5/10)*100 = 150%.
+    // Jika realisasi = 15, target = 10: 100 - ((15-10)/10)*100 = 50%.
+    performance = 100 - ( (realizationValue - targetValue) / Math.abs(targetValue) ) * 100;
 
   } else { 
+    // Target positif: semakin tinggi semakin baik
     performance = (realizationValue / targetValue) * 100;
   }
-  return parseFloat(performance.toFixed(2)); 
+  return parseFloat(Math.max(0, performance).toFixed(2)); // Pastikan kinerja tidak negatif
 };
 
 
@@ -112,6 +130,8 @@ export default function ConductMonitoringPage() {
   const [savingStates, setSavingStates] = useState<Record<string, boolean>>({}); 
   const [controlSavingStates, setControlSavingStates] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
+  const [isCompleteSessionDialogOpen, setIsCompleteSessionDialogOpen] = useState(false);
+  const [incompleteKRICount, setIncompleteKRICount] = useState(0);
 
 
   const currentUserId = useMemo(() => currentUser?.uid, [currentUser]);
@@ -120,6 +140,7 @@ export default function ConductMonitoringPage() {
 
   const [exposureValues, setExposureValues] = useState<Record<string, string | number>>({});
   const [exposureNotes, setExposureNotes] = useState<Record<string, string>>({});
+  const [isToleranceNegativeForCause, setIsToleranceNegativeForCause] = useState<Record<string, boolean>>({});
   
   const [controlMonitoringFormValues, setControlMonitoringFormValues] = useState<Record<string, ControlMonitoringFormState>>({});
 
@@ -198,15 +219,18 @@ export default function ConductMonitoringPage() {
 
       const initialExposureValues: Record<string, string | number> = {};
       const initialExposureNotes: Record<string, string> = {};
+      const initialIsToleranceNegative: Record<string, boolean> = {};
       const initialControlFormValues: Record<string, ControlMonitoringFormState> = {};
 
       causesToDisplay.forEach(mc => {
         if (mc.riskExposure) {
           initialExposureValues[mc.id] = mc.riskExposure.exposureValue !== null ? mc.riskExposure.exposureValue : '';
           initialExposureNotes[mc.id] = mc.riskExposure.exposureNotes || '';
+          initialIsToleranceNegative[mc.id] = mc.riskExposure.isToleranceNegative || false;
         } else {
           initialExposureValues[mc.id] = '';
           initialExposureNotes[mc.id] = '';
+          initialIsToleranceNegative[mc.id] = false; 
         }
         mc.controls.forEach(ctrl => {
           const monitoredCtrlData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
@@ -221,6 +245,7 @@ export default function ConductMonitoringPage() {
       });
       setExposureValues(initialExposureValues);
       setExposureNotes(initialExposureNotes);
+      setIsToleranceNegativeForCause(initialIsToleranceNegative);
       setControlMonitoringFormValues(initialControlFormValues);
     }
   }, [currentSession, riskCauses, controlMeasures, riskExposures, monitoredControlMeasuresData, store.potentialRisks, store.goals, currentUserId, currentPeriod]);
@@ -245,6 +270,10 @@ export default function ConductMonitoringPage() {
   const handleExposureNotesChange = (riskCauseId: string, value: string) => {
     setExposureNotes(prev => ({ ...prev, [riskCauseId]: value }));
   };
+  
+  const handleIsToleranceNegativeChange = (riskCauseId: string, checked: boolean) => {
+    setIsToleranceNegativeForCause(prev => ({ ...prev, [riskCauseId]: checked }));
+  };
 
   const handleSaveExposure = async (riskCauseId: string) => {
     if (!currentSession || !currentUserId || !currentPeriod) {
@@ -253,7 +282,7 @@ export default function ConductMonitoringPage() {
     }
     setSavingStates(prev => ({ ...prev, [riskCauseId]: true }));
     const exposureValueStr = String(exposureValues[riskCauseId]);
-    const exposureValueNum = exposureValueStr !== '' ? parseFloat(exposureValueStr) : null;
+    const exposureValueNum = exposureValueStr !== '' ? parseNumericValue(exposureValueStr) : null;
 
     if (exposureValueStr !== '' && (isNaN(Number(exposureValueNum)) || exposureValueNum === null)) {
         toast({ title: "Input Tidak Valid", description: "Nilai risiko yang terjadi harus berupa angka.", variant: "destructive" });
@@ -261,7 +290,15 @@ export default function ConductMonitoringPage() {
         return;
     }
     const notes = exposureNotes[riskCauseId] || null;
-    const exposureData = { monitoringSessionId: sessionId, riskCauseId, exposureValue: exposureValueNum, exposureNotes: notes };
+    const isToleranceNegative = isToleranceNegativeForCause[riskCauseId] || false;
+    
+    const exposureData = { 
+        monitoringSessionId: sessionId, 
+        riskCauseId, 
+        exposureValue: exposureValueNum, 
+        exposureNotes: notes,
+        isToleranceNegative: isToleranceNegative, // Simpan status toleransi negatif
+    };
 
     try {
       await upsertRiskExposureInState(exposureData, currentUserId, currentPeriod);
@@ -326,8 +363,8 @@ export default function ConductMonitoringPage() {
         setControlSavingStates(prev => ({...prev, [controlMeasureId]: false}));
     }
   };
-
-  const handleCompleteMonitoring = async () => {
+  
+  const confirmCompleteMonitoring = async () => {
     if (!currentSession) return;
     try {
       const updatedSession = await updateMonitoringSessionStatusInState(currentSession.id, 'Selesai');
@@ -338,6 +375,22 @@ export default function ConductMonitoringPage() {
       toast({ title: "Gagal Menyelesaikan Sesi", description: error.message || String(error), variant: "destructive" });
     }
   };
+
+  const handleAttemptCompleteMonitoring = () => {
+    const notFilledKRICount = monitoredCausesWithControls.filter(cause => {
+        const exposure = riskExposures.find(re => re.riskCauseId === cause.id && re.monitoringSessionId === sessionId);
+        return !exposure || exposure.exposureValue === null;
+    }).length;
+    
+    setIncompleteKRICount(notFilledKRICount);
+
+    if (notFilledKRICount > 0) {
+        setIsCompleteSessionDialogOpen(true);
+    } else {
+        confirmCompleteMonitoring();
+    }
+  };
+
 
   const handleDownloadReport = () => {
     if (!currentSession || !currentUser || !appUser || !currentPeriod) {
@@ -375,6 +428,7 @@ export default function ConductMonitoringPage() {
             "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
             "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
             "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
+            "Toleransi Negatif (KRI Penyebab)": cause.riskExposure?.isToleranceNegative ? "Ya" : "Tidak",
             "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
             "Kode Pengendalian": controlCode,
             "Deskripsi Pengendalian": ctrl.description,
@@ -389,7 +443,6 @@ export default function ConductMonitoringPage() {
           });
         });
       } else {
-        // Row for cause if it has no controls
         reportRows.push({
             "Kode Sasaran": grandParentGoal?.code || "N/A",
             "Nama Sasaran": grandParentGoal?.name || "N/A",
@@ -407,6 +460,7 @@ export default function ConductMonitoringPage() {
             "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
             "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
             "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
+            "Toleransi Negatif (KRI Penyebab)": cause.riskExposure?.isToleranceNegative ? "Ya" : "Tidak",
             "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
             "Kode Pengendalian": "N/A",
             "Deskripsi Pengendalian": "N/A",
@@ -426,9 +480,8 @@ export default function ConductMonitoringPage() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Pemantauan Risiko");
     
-    // Auto-size columns
     const cols = Object.keys(reportRows[0] || {}).map(key => ({
-      wch: Math.max(...reportRows.map(row => String(row[key] || "").length), key.length) + 2 // Add some padding
+      wch: Math.max(...reportRows.map(row => String(row[key] || "").length), key.length) + 2 
     }));
     worksheet["!cols"] = cols;
     
@@ -466,7 +519,7 @@ export default function ConductMonitoringPage() {
         description={pageDescription}
         actions={
             <div className="flex space-x-2">
-                <Button variant="outline" onClick={handleDownloadReport} disabled={currentSession.status !== 'Selesai' && filteredMonitoredCauses.length === 0}>
+                <Button variant="outline" onClick={handleDownloadReport} disabled={filteredMonitoredCauses.length === 0}>
                     <FileText className="mr-2 h-4 w-4" /> Unduh Laporan XLSX
                 </Button>
                 <Link href="/monitoring" passHref><Button variant="outline"><ArrowLeft className="mr-2 h-4 w-4" /> Kembali</Button></Link>
@@ -501,21 +554,40 @@ export default function ConductMonitoringPage() {
         { filteredMonitoredCauses.map((cause) => {
           const { level: currentRiskLevelText, score: currentRiskScore } = getCalculatedRiskLevel(cause.likelihood, cause.impact);
           const toleranceValue = parseToleranceValue(cause.riskTolerance);
-          const exposureValueNum = exposureValues[cause.id] !== '' && exposureValues[cause.id] !== undefined ? Number(exposureValues[cause.id]) : null;
+          const exposureValueNum = exposureValues[cause.id] !== '' && exposureValues[cause.id] !== undefined ? parseNumericValue(String(exposureValues[cause.id])) : null;
+          const isKriSaved = cause.riskExposure?.exposureValue !== null && cause.riskExposure?.exposureValue !== undefined;
+
           let comparisonResultText = "";
           let guidanceText = "";
           let isExceeded: boolean | null = null;
 
           if (exposureValueNum !== null && toleranceValue !== null) {
-            const difference = exposureValueNum - toleranceValue;
-            if (difference >= 0) { 
-              isExceeded = true;
-              comparisonResultText = `Paparan (${exposureValueNum}) >= Toleransi (${toleranceValue}). Hasil: +${difference}. Potensi Risiko Telah Menjadi Risiko Aktual.`;
-              guidanceText = "Segera lakukan tindakan pengendalian (Risk Mitigation) dan susun/perbaiki Tindakan Korektif (Corrective Action).";
-            } else {
-              isExceeded = false;
-              comparisonResultText = `Paparan (${exposureValueNum}) < Toleransi (${toleranceValue}). Hasil: ${difference}. Pengendalian Preventif Berjalan Baik.`;
-              guidanceText = "Lakukan pengendalian risiko sesuai rencana. Tinjau dan perbaiki rencana pengendalian jika diperlukan.";
+            const isNegativeTolerance = isToleranceNegativeForCause[cause.id] || false;
+            if (isNegativeTolerance) { // Toleransi negatif: makin rendah makin baik
+              if (exposureValueNum <= toleranceValue) {
+                isExceeded = false;
+                comparisonResultText = `Paparan (${exposureValueNum}) <= Toleransi (${toleranceValue}). Target tercapai atau lebih baik.`;
+                guidanceText = "Pengendalian Preventif berjalan baik. Lanjutkan & tinjau rencana pengendalian jika perlu.";
+              } else {
+                isExceeded = true;
+                comparisonResultText = `Paparan (${exposureValueNum}) > Toleransi (${toleranceValue}). Target terlampaui.`;
+                guidanceText = "Segera lakukan mitigasi risiko dan susun/perbaiki Tindakan Korektif.";
+              }
+            } else { // Toleransi positif: makin tinggi makin baik (atau batas atas yang tidak boleh dilewati)
+                 // Jika KRI adalah sesuatu yang ingin kita minimalkan (misal jumlah error), maka toleransi adalah batas atas
+                 // dan isToleranceNegative harusnya true.
+                 // Jika KRI adalah sesuatu yang ingin kita maksimalkan (misal % capaian), maka toleransi adalah batas bawah,
+                 // dan isToleranceNegative harusnya false.
+                 // Anggaplah toleransi adalah batas MAKSIMUM yang dapat diterima jika tidak negatif
+              if (exposureValueNum > toleranceValue) {
+                isExceeded = true;
+                comparisonResultText = `Paparan (${exposureValueNum}) > Toleransi (${toleranceValue}). Hasil: +${(exposureValueNum - toleranceValue).toFixed(2)}. Risiko Aktual.`;
+                guidanceText = "Segera lakukan mitigasi risiko dan susun/perbaiki Tindakan Korektif.";
+              } else {
+                isExceeded = false;
+                comparisonResultText = `Paparan (${exposureValueNum}) <= Toleransi (${toleranceValue}). Hasil: ${(exposureValueNum - toleranceValue).toFixed(2)}. Risiko Terkendali.`;
+                guidanceText = "Lakukan pengendalian risiko sesuai rencana. Tinjau dan perbaiki rencana pengendalian jika diperlukan.";
+              }
             }
           }
           return (
@@ -533,10 +605,20 @@ export default function ConductMonitoringPage() {
                   </CardDescription>
                 </div>
               </AccordionTrigger>
-              <AccordionContent className={cn("p-4 pt-0", "w-full")}> {/* Added w-full */}
+              <AccordionContent className={cn("p-4 pt-0", "w-full")}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start pt-4">
                     <div className="space-y-3">
-                        <div><Label htmlFor={`exposureValue-${cause.id}`}>Realisasi KRI (Nilai Risiko yang Terjadi)</Label><Input id={`exposureValue-${cause.id}`} type="number" placeholder="Nilai numerik risiko yang terjadi" value={exposureValues[cause.id] ?? ''} onChange={(e) => handleExposureValueChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-grow">
+                            <Label htmlFor={`exposureValue-${cause.id}`}>Realisasi KRI (Nilai Risiko yang Terjadi)</Label>
+                            <Input id={`exposureValue-${cause.id}`} type="text" placeholder="Nilai numerik risiko yang terjadi" value={exposureValues[cause.id] ?? ''} onChange={(e) => handleExposureValueChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/>
+                          </div>
+                          {isKriSaved && <CheckCircle2 className="h-6 w-6 text-green-500 flex-shrink-0 mt-5" />}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <Checkbox id={`isToleranceNegative-${cause.id}`} checked={isToleranceNegativeForCause[cause.id] || false} onCheckedChange={(checked) => handleIsToleranceNegativeChange(cause.id, Boolean(checked))} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'} />
+                            <Label htmlFor={`isToleranceNegative-${cause.id}`} className="text-xs font-normal">Toleransi Negatif (makin rendah realisasi KRI, makin baik)</Label>
+                        </div>
                         <div><Label htmlFor={`exposureNotes-${cause.id}`}>Catatan/Deskripsi Paparan Risiko</Label><Textarea id={`exposureNotes-${cause.id}`} placeholder="Jelaskan konteks paparan..." rows={2} value={exposureNotes[cause.id] ?? ''} onChange={(e) => handleExposureNotesChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
                         <Button onClick={() => handleSaveExposure(cause.id)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'} size="sm">{savingStates[cause.id] ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Simpan Paparan</Button>
                     </div>
@@ -554,18 +636,18 @@ export default function ConductMonitoringPage() {
                            const formState = controlMonitoringFormValues[ctrl.id] || { realizationKCI: "", isTargetNegative: false, controlActivityNarrative: "", supportingDocumentUrl: "", selectedFileName: ""};
                            const calculatedPerformance = calculateControlPerformance(formState.realizationKCI, ctrl.target, formState.isTargetNegative);
                            const performanceTooltipText = formState.isTargetNegative 
-                             ? `Target Negatif. Rumus: ((2 * Target - Realisasi) / Target) * 100%. Target: ${ctrl.target || 'N/A'}. Realisasi: ${formState.realizationKCI || 'N/A'}`
+                             ? `Target Negatif. Rumus: 100 - ((Realisasi - Target) / ABS(Target)) * 100%. Target: ${ctrl.target || 'N/A'}. Realisasi: ${formState.realizationKCI || 'N/A'}`
                              : `Target Positif. Rumus: (Realisasi / Target) * 100%. Target: ${ctrl.target || 'N/A'}. Realisasi: ${formState.realizationKCI || 'N/A'}`;
-                           const isMonitored = monitoredControlMeasuresData.some(
-                              (mcmd) => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id
+                           const isControlMonitored = monitoredControlMeasuresData.some(
+                              (mcmd) => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id && mcmd.realizationKCI !== null
                            );
 
                            return (
-                            <Card key={ctrl.id} className="flex-shrink-0 shadow-md flex flex-col lg:w-1/3 md:w-1/2 min-w-[300px] sm:min-w-[340px]"> {/* Adjusted width */}
+                            <Card key={ctrl.id} className="flex-shrink-0 shadow-md flex flex-col lg:w-1/3 md:w-1/2 min-w-[300px] sm:min-w-[340px]">
                                 <CardHeader className="pb-3 pt-4 bg-muted/50 dark:bg-slate-800 rounded-t-md min-h-[100px]">
                                     <div className="flex justify-between items-start">
                                         <CardTitle className="text-sm flex items-center">
-                                            {isMonitored && <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />} 
+                                            {isControlMonitored && <CheckCircle2 className="h-5 w-5 mr-2 text-green-500" />} 
                                             ({index + 1}) {controlCode} - {getControlTypeName(ctrl.controlType)}
                                         </CardTitle>
                                     </div>
@@ -582,7 +664,7 @@ export default function ConductMonitoringPage() {
                                     </div>
                                     <div className="flex items-center space-x-2">
                                         <Checkbox id={`isTargetNegative-${ctrl.id}`} checked={formState.isTargetNegative} onCheckedChange={(checked) => handleControlMonitoringInputChange(ctrl.id, 'isTargetNegative', Boolean(checked))} disabled={controlSavingStates[ctrl.id] || currentSession.status === 'Selesai'} />
-                                        <Label htmlFor={`isTargetNegative-${ctrl.id}`} className="text-xs font-normal">Target Negatif (makin rendah realisasi, makin baik)</Label>
+                                        <Label htmlFor={`isTargetNegative-${ctrl.id}`} className="text-xs font-normal">Target Negatif (makin rendah realisasi KCI, makin baik)</Label>
                                     </div>
                                     <div>
                                         <Label className="flex items-center">Kinerja Pengendalian (%)
@@ -630,9 +712,32 @@ export default function ConductMonitoringPage() {
       </Accordion>
       {currentSession.status !== 'Selesai' && monitoredCausesWithControls.length > 0 && (
         <div className="mt-8 flex justify-end">
-          <Button onClick={handleCompleteMonitoring} variant="default" size="lg"><CheckCircle2 className="mr-2 h-5 w-5" /> Selesaikan Sesi Pemantauan Ini</Button>
+          <Button onClick={handleAttemptCompleteMonitoring} variant="default" size="lg"><CheckCircle2 className="mr-2 h-5 w-5" /> Selesaikan Sesi Pemantauan Ini</Button>
         </div>
       )}
+      <AlertDialog open={isCompleteSessionDialogOpen} onOpenChange={setIsCompleteSessionDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Konfirmasi Penyelesaian Sesi</AlertDialogTitle>
+            <AlertDialogDescription>
+              {incompleteKRICount > 0 
+                ? `Terdapat ${incompleteKRICount} Penyebab Risiko yang belum diisi Realisasi KRI-nya. Apakah Anda yakin ingin menyelesaikan sesi pemantauan ini? Data yang belum terisi akan dianggap kosong.`
+                : "Apakah Anda yakin ingin menyelesaikan sesi pemantauan ini?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setIsCompleteSessionDialogOpen(false)}>Batalkan</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              setIsCompleteSessionDialogOpen(false);
+              confirmCompleteMonitoring();
+            }} className={incompleteKRICount > 0 ? "bg-destructive hover:bg-destructive/90" : ""}>
+              {incompleteKRICount > 0 ? "Tetap Selesaikan (Data Tidak Lengkap)" : "Ya, Selesaikan Sesi"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
+    
