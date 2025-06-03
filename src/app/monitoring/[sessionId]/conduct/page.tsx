@@ -63,29 +63,11 @@ const calculateControlPerformance = (
 
   let performance: number;
   if (isTargetNegative) { 
-    // Target negatif: jika target -10, realisasi -5 (lebih baik), kinerja > 100.
-    // Jika realisasi -15 (lebih buruk), kinerja < 100.
-    // Jika target 10 (misal, target < 10), realisasi 5 (lebih baik), kinerja > 100.
-    // Realisasi 15 (lebih buruk), kinerja < 100.
-    // Rumus: 100 + ((Target - Realisasi) / ABS(Target)) * 100
-    // Jika Target > 0 (misal target < 10, jadi toleransi = 10), dan realisasi 5 -> 100 + ((10-5)/10)*100 = 150
-    // Jika realisasi 15 -> 100 + ((10-15)/10)*100 = 50
-    // Jika Target < 0 (misal target > -10, jadi toleransi = -10), dan realisasi -5 -> 100 + ((-10 - (-5))/10)*100 = 100 + (-5/10)*100 = 50 (SALAH, harusnya lebih baik)
-    // Revisi: Jika Target Negatif, artinya "semakin rendah semakin baik".
-    // Jika realisasi <= target, kinerja >= 100%. Jika realisasi > target, kinerja < 100%.
-    // Performance = ( (target - (realization - target) ) / abs(target) ) * 100 (jika target != 0)
-    // Atau, sederhananya: Jika target < 0 (misal -10), dan realisasi -5 (lebih tinggi, lebih buruk). Realisasi -15 (lebih rendah, lebih baik).
-    // Jika target > 0 (misal <10), dan realisasi 5 (lebih rendah, lebih baik). Realisasi 15 (lebih tinggi, lebih buruk).
-    // Kinerja = 100 - ( (Realisasi - Target) / ABS(Target) ) * 100 (jika target != 0)
-    // Jika realisasi = 5, target = 10 (negatif berarti target < 10): 100 - ((5-10)/10)*100 = 100 - (-5/10)*100 = 150%.
-    // Jika realisasi = 15, target = 10: 100 - ((15-10)/10)*100 = 50%.
     performance = 100 - ( (realizationValue - targetValue) / Math.abs(targetValue) ) * 100;
-
   } else { 
-    // Target positif: semakin tinggi semakin baik
     performance = (realizationValue / targetValue) * 100;
   }
-  return parseFloat(Math.max(0, performance).toFixed(2)); // Pastikan kinerja tidak negatif
+  return parseFloat(Math.max(0, performance).toFixed(2));
 };
 
 
@@ -226,11 +208,12 @@ export default function ConductMonitoringPage() {
         if (mc.riskExposure) {
           initialExposureValues[mc.id] = mc.riskExposure.exposureValue !== null ? mc.riskExposure.exposureValue : '';
           initialExposureNotes[mc.id] = mc.riskExposure.exposureNotes || '';
-          initialIsToleranceNegative[mc.id] = mc.riskExposure.isToleranceNegative || false;
+          // Default isToleranceNegative for cause KRI from riskExposure if it exists
+          initialIsToleranceNegative[mc.id] = mc.riskExposure?.isToleranceNegative || false;
         } else {
           initialExposureValues[mc.id] = '';
           initialExposureNotes[mc.id] = '';
-          initialIsToleranceNegative[mc.id] = false; 
+          initialIsToleranceNegative[mc.id] = false; // Default to false if no exposure data yet
         }
         mc.controls.forEach(ctrl => {
           const monitoredCtrlData = monitoredControlMeasuresData.find(mcmd => mcmd.controlMeasureId === ctrl.id && mcmd.monitoringSessionId === currentSession.id);
@@ -297,7 +280,7 @@ export default function ConductMonitoringPage() {
         riskCauseId, 
         exposureValue: exposureValueNum, 
         exposureNotes: notes,
-        isToleranceNegative: isToleranceNegative, // Simpan status toleransi negatif
+        isToleranceNegative: isToleranceNegative, 
     };
 
     try {
@@ -428,7 +411,7 @@ export default function ConductMonitoringPage() {
             "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
             "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
             "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
-            "Toleransi Negatif (KRI Penyebab)": cause.riskExposure?.isToleranceNegative ? "Ya" : "Tidak",
+            "Toleransi Negatif (KRI Penyebab)": isToleranceNegativeForCause[cause.id] ? "Ya" : "Tidak",
             "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
             "Kode Pengendalian": controlCode,
             "Deskripsi Pengendalian": ctrl.description,
@@ -460,7 +443,7 @@ export default function ConductMonitoringPage() {
             "Tingkat Risiko Awal (Penyebab)": initialRiskLevelText,
             "Skor Risiko Awal (Penyebab)": initialRiskScore ?? "N/A",
             "Realisasi KRI (Paparan Risiko Sesi Ini)": cause.riskExposure?.exposureValue ?? "N/A",
-            "Toleransi Negatif (KRI Penyebab)": cause.riskExposure?.isToleranceNegative ? "Ya" : "Tidak",
+            "Toleransi Negatif (KRI Penyebab)": isToleranceNegativeForCause[cause.id] ? "Ya" : "Tidak",
             "Catatan Paparan Risiko (Sesi Ini)": cause.riskExposure?.exposureNotes || "N/A",
             "Kode Pengendalian": "N/A",
             "Deskripsi Pengendalian": "N/A",
@@ -556,14 +539,14 @@ export default function ConductMonitoringPage() {
           const toleranceValue = parseToleranceValue(cause.riskTolerance);
           const exposureValueNum = exposureValues[cause.id] !== '' && exposureValues[cause.id] !== undefined ? parseNumericValue(String(exposureValues[cause.id])) : null;
           const isKriSaved = cause.riskExposure?.exposureValue !== null && cause.riskExposure?.exposureValue !== undefined;
+          const isCauseToleranceNegative = isToleranceNegativeForCause[cause.id] || false;
 
           let comparisonResultText = "";
           let guidanceText = "";
           let isExceeded: boolean | null = null;
 
           if (exposureValueNum !== null && toleranceValue !== null) {
-            const isNegativeTolerance = isToleranceNegativeForCause[cause.id] || false;
-            if (isNegativeTolerance) { // Toleransi negatif: makin rendah makin baik
+            if (isCauseToleranceNegative) { // Toleransi negatif: makin rendah makin baik
               if (exposureValueNum <= toleranceValue) {
                 isExceeded = false;
                 comparisonResultText = `Paparan (${exposureValueNum}) <= Toleransi (${toleranceValue}). Target tercapai atau lebih baik.`;
@@ -573,12 +556,7 @@ export default function ConductMonitoringPage() {
                 comparisonResultText = `Paparan (${exposureValueNum}) > Toleransi (${toleranceValue}). Target terlampaui.`;
                 guidanceText = "Segera lakukan mitigasi risiko dan susun/perbaiki Tindakan Korektif.";
               }
-            } else { // Toleransi positif: makin tinggi makin baik (atau batas atas yang tidak boleh dilewati)
-                 // Jika KRI adalah sesuatu yang ingin kita minimalkan (misal jumlah error), maka toleransi adalah batas atas
-                 // dan isToleranceNegative harusnya true.
-                 // Jika KRI adalah sesuatu yang ingin kita maksimalkan (misal % capaian), maka toleransi adalah batas bawah,
-                 // dan isToleranceNegative harusnya false.
-                 // Anggaplah toleransi adalah batas MAKSIMUM yang dapat diterima jika tidak negatif
+            } else { // Toleransi positif (atau default): makin rendah makin baik (jika toleransi adalah batas atas)
               if (exposureValueNum > toleranceValue) {
                 isExceeded = true;
                 comparisonResultText = `Paparan (${exposureValueNum}) > Toleransi (${toleranceValue}). Hasil: +${(exposureValueNum - toleranceValue).toFixed(2)}. Risiko Aktual.`;
@@ -622,7 +600,21 @@ export default function ConductMonitoringPage() {
                         <div><Label htmlFor={`exposureNotes-${cause.id}`}>Catatan/Deskripsi Paparan Risiko</Label><Textarea id={`exposureNotes-${cause.id}`} placeholder="Jelaskan konteks paparan..." rows={2} value={exposureNotes[cause.id] ?? ''} onChange={(e) => handleExposureNotesChange(cause.id, e.target.value)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'}/></div>
                         <Button onClick={() => handleSaveExposure(cause.id)} disabled={savingStates[cause.id] || currentSession.status === 'Selesai'} size="sm">{savingStates[cause.id] ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Simpan Paparan</Button>
                     </div>
-                    {comparisonResultText && (<Alert variant={isExceeded ? "destructive" : "default"} className={isExceeded === false ? "bg-green-50 dark:bg-green-500/30 border-green-200 dark:border-green-700" : ""}>{isExceeded ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}<AlertTitle className={isExceeded === false ? "text-green-800 dark:text-green-200" : ""}>{isExceeded ? "Risiko Melebihi Toleransi!" : "Risiko Terkendali"}</AlertTitle><AlertDescription className={isExceeded === false ? "text-green-700 dark:text-green-300" : ""}><p className="font-semibold">{comparisonResultText}</p><p className="mt-1">{guidanceText}</p></AlertDescription></Alert>)}
+                    {comparisonResultText && (
+                    <Alert 
+                        variant={isExceeded ? "destructive" : "default"} 
+                        className={isExceeded === false ? "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700" : ""}
+                    >
+                        {isExceeded ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                        <AlertTitle className={isExceeded === false ? "text-green-800 dark:text-green-200" : ""}>
+                            {isExceeded ? "Risiko Melebihi Toleransi!" : "Risiko Terkendali"}
+                        </AlertTitle>
+                        <AlertDescription className={isExceeded === false ? "text-green-700 dark:text-green-300" : ""}>
+                            <p className="font-semibold">{comparisonResultText}</p>
+                            <p className="mt-1">{guidanceText}</p>
+                        </AlertDescription>
+                    </Alert>
+                    )}
                 </div>
                 <Separator className="my-6" />
                 <div>
