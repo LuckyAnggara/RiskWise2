@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, ShieldCheck, FileText, Activity, Columns, FileArchive, Users, Briefcase, Shield } from "lucide-react"; 
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, ShieldCheck, FileText, Activity, Columns, FileArchive, Users, Briefcase, Shield, SearchCheck } from "lucide-react"; 
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -13,7 +13,7 @@ import {
   SidebarGroupLabel,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { useAuth } from '@/contexts/auth-context'; // Import useAuth
+import { useAuth } from '@/contexts/auth-context';
 
 interface NavItem {
   label: string; 
@@ -21,12 +21,14 @@ interface NavItem {
   icon: React.ElementType;
   alwaysEnabled?: boolean; 
   adminOnly?: boolean;
+  auditorOnly?: boolean;
 }
 
-export function SidebarNav() { // Removed uprUnassigned prop
+export function SidebarNav() {
   const pathname = usePathname(); 
   const { openMobile, setOpenMobile } = useSidebar();
-  const { isUprAssigned, isAdmin } = useAuth(); // Get isUprAssigned and isAdmin from context
+  const { isUprAssigned, isAdmin, appUser } = useAuth();
+  const isAuditor = appUser?.role === 'auditor';
 
   const navItems: NavItem[] = [
     { label: "Dasbor", href: "/", icon: LayoutDashboard },
@@ -37,6 +39,7 @@ export function SidebarNav() { // Removed uprUnassigned prop
     { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
     { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
     { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
+    { label: "Audit UPR", href: "/audit/select-upr", icon: SearchCheck, auditorOnly: true},
     { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
   ];
 
@@ -50,7 +53,7 @@ export function SidebarNav() { // Removed uprUnassigned prop
     if (navHref === "/") {
       return pathname === "/";
     }
-    if (["/risk-document", "/comparative-monitoring", "/admin"].some(p => navHref.startsWith(p))) {
+    if (["/risk-document", "/comparative-monitoring", "/admin", "/audit"].some(p => navHref.startsWith(p))) {
         return pathname.startsWith(navHref);
     }
     if (navHref === "/all-risks") {
@@ -60,18 +63,22 @@ export function SidebarNav() { // Removed uprUnassigned prop
   };
 
   const renderNavItem = (item: NavItem) => {
-    const isDisabled = !item.alwaysEnabled && (
-      (item.adminOnly && !isAdmin) || (!item.adminOnly && !isAdmin && !isUprAssigned)
-    );
-    
+    let isDisabled = false;
     let tooltipText = item.label;
-    if (isDisabled) {
-        if (item.adminOnly && !isAdmin) {
-            tooltipText = "Menu ini hanya untuk Administrator.";
-        } else if (!item.adminOnly && !isAdmin && !isUprAssigned) {
-            tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
-        }
+
+    if (item.adminOnly && !isAdmin) {
+        isDisabled = true;
+        tooltipText = "Menu ini hanya untuk Administrator.";
+    } else if (item.auditorOnly && !isAuditor) {
+        isDisabled = true; // Sembunyikan saja jika tidak relevan, atau disable jika ingin tetap terlihat
+        return null; // Atau styling disabled
+    } else if (!item.alwaysEnabled && !item.adminOnly && !item.auditorOnly && !isUprAssigned) {
+        // Untuk menu User Satker standar, disable jika UPR belum di-assign dan bukan admin
+        isDisabled = true;
+        tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
     }
+    
+    if (item.auditorOnly && !isAuditor) return null; // Sembunyikan menu audit jika bukan auditor
 
     return (
       <SidebarMenuItem key={item.href}>
@@ -99,8 +106,8 @@ export function SidebarNav() { // Removed uprUnassigned prop
   return (
     <SidebarMenu>
       <SidebarGroup>
-        <SidebarGroupLabel>Menu Pengguna</SidebarGroupLabel>
-        {navItems.map(renderNavItem)}
+        <SidebarGroupLabel>Menu Utama</SidebarGroupLabel>
+        {navItems.filter(item => !item.adminOnly).map(renderNavItem)}
       </SidebarGroup>
       {isAdmin && (
         <SidebarGroup>
@@ -111,5 +118,4 @@ export function SidebarNav() { // Removed uprUnassigned prop
     </SidebarMenu>
   );
 }
-
     
