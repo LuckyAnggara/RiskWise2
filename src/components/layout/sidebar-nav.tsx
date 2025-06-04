@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns, FileArchive } from "lucide-react"; // Added Columns, FileArchive
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns, FileArchive } from "lucide-react"; 
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -41,7 +41,7 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     if (navHref === "/") {
       return pathname === "/";
     }
-    // Untuk /risk-document, pastikan exact match atau startsWith jika ada sub-halaman
+    // For /risk-document, ensure exact match or startsWith if there are sub-pages
     if (navHref === "/risk-document") {
         return pathname === navHref || pathname.startsWith(navHref + "/");
     }
@@ -61,7 +61,7 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
                 onClick={() => {
                   if (openMobile) setOpenMobile(false);
                   if (item.disabled) {
-                    console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap atau data belum siap.`);
+                    // console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap atau data belum siap.`);
                   }
                 }}
                 disabled={item.disabled}

@@ -2,7 +2,7 @@
 "use client";
 
 import React from 'react';
-import type { FlatReportItem } from '@/app/risk-document/page'; // Mengimpor tipe dari halaman
+import type { FlatReportItem } from '@/app/risk-document/page'; 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +29,6 @@ export function ComprehensiveReportTable({ data, period }: ComprehensiveReportTa
     );
   }
 
-  // Define columns dynamically based on available data or use a fixed set
   const columns = [
     { header: "Kode Sasaran", accessor: "goalCode" },
     { header: "Nama Sasaran", accessor: "goalName" },
@@ -107,3 +106,4 @@ export function ComprehensiveReportTable({ data, period }: ComprehensiveReportTa
   );
 }
 
+    

@@ -18,8 +18,8 @@ interface ComprehensiveReportTreeItemProps {
   level: number;
   userId: string;
   period: string;
-  parentGoalCode?: string; // Pass down from parent
-  parentPotentialRiskCode?: string; // Pass down from parent
+  parentGoalCode?: string; 
+  parentPotentialRiskCode?: string; 
 }
 
 export function ComprehensiveReportTreeItem({ 
@@ -48,9 +48,6 @@ export function ComprehensiveReportTreeItem({
     let nextItemType: ItemType | null = null;
 
     try {
-      // Simulate async fetch delay for demonstration if needed
-      // await new Promise(resolve => setTimeout(resolve, 500));
-
       switch (itemType) {
         case 'goal':
           const prsForGoal = potentialRisksFromStore.filter(
@@ -123,16 +120,14 @@ export function ComprehensiveReportTreeItem({
             {rcFullCode}: {rc.description} (Sumber: <Badge variant="outline" className="text-xs">{rc.source}</Badge>)
             {rcLevel !== 'N/A' && (
               <Badge className={`${getRiskLevelColor(rcLevel)} text-xs ml-2`}>
-                {rcLevel} ({rcScore})
+                {rcLevel} ({rcScore ?? 'N/A'})
               </Badge>
             )}
           </>
         );
       case 'controlMeasure':
         const cm = item as ControlMeasure;
-        // Assuming parentRiskCauseCode is passed for CM or derived for full code.
-        // For simplicity here, just using its own type and sequence.
-        const cmCode = `${cm.controlType}.${cm.sequenceNumber || '?'}`;
+        const cmCode = `${parentPotentialRiskCode || 'PR?'}.PC${(cm as any).riskCauseSequenceNumber || '?'}.${cm.controlType}.${cm.sequenceNumber || '?'}`;
         return <>{cmCode}: {cm.description} <Badge variant="outline" className="ml-2 text-xs">{getControlTypeName(cm.controlType)}</Badge></>;
       default:
         return 'Unknown Item';
@@ -140,9 +135,11 @@ export function ComprehensiveReportTreeItem({
   };
   
   const currentGoalCode = itemType === 'goal' ? (item as Goal).code : parentGoalCode;
-  const currentPotentialRiskCode = itemType === 'potentialRisk' 
-    ? `${currentGoalCode || 'S?'}.PR${(item as PotentialRisk).sequenceNumber || '?'}` 
-    : parentPotentialRiskCode;
+  let currentPotentialRiskCode = parentPotentialRiskCode;
+  if (itemType === 'potentialRisk') {
+     const prItem = item as PotentialRisk;
+     currentPotentialRiskCode = `${currentGoalCode || 'S?'}.PR${prItem.sequenceNumber || '?'}`;
+  }
 
 
   return (
@@ -198,3 +195,5 @@ export function ComprehensiveReportTreeItem({
     </div>
   );
 }
+
+    

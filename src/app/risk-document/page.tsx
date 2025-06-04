@@ -12,7 +12,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import type { Goal, PotentialRisk, RiskCause, ControlMeasure, RiskCategory, RiskSource, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory, ControlMeasureTypeKey } from '@/lib/types';
 import { getCalculatedRiskLevel, getControlTypeName } from '@/lib/types';
 import { ComprehensiveReportTree } from '@/components/risks/comprehensive-report-tree';
-import { ComprehensiveReportTable } from '@/components/risks/comprehensive-report-table'; // Komponen baru
+import { ComprehensiveReportTable } from '@/components/risks/comprehensive-report-table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,7 +22,6 @@ export interface FlatReportItem {
   goalCode?: string;
   goalName?: string;
   goalDescription?: string;
-  goalll?:string;
 
   potentialRiskCode?: string;
   potentialRiskSequenceNumber?: number;
@@ -205,9 +204,6 @@ export default function ComprehensiveReportPage() {
         setIsLoadingReportData(false);
         console.log(`[CompReportPage] Report data ready for ${uniqueId}.`);
       } else if (storeDataFetchedForPeriod !== uniqueId && !isLoadingReportData) {
-        // This case might happen if user changes period *after* submitting a report for a different period.
-        // The triggerGlobalDataFetch should handle this if handleShowReport is called again.
-        console.log(`[CompReportPage] Data fetched for ${storeDataFetchedForPeriod}, but report is for ${uniqueId}. Waiting for correct data.`);
         // Data might still be loading if triggerGlobalDataFetch was just called.
       }
     }
@@ -215,7 +211,7 @@ export default function ComprehensiveReportPage() {
     reportSubmitted, currentUserId, selectedPeriodForReport, selectedViewMode,
     storeDataFetchedForPeriod, goalsLoadingFromStore, potentialRisksLoadingFromStore, 
     riskCausesLoadingFromStore, controlMeasuresLoadingFromStore,
-    goalsFromStore, potentialRisksFromStore, riskCausesFromStore, controlMeasuresFromStore // Added dependencies for processDataForTable
+    goalsFromStore, potentialRisksFromStore, riskCausesFromStore, controlMeasuresFromStore
   ]);
 
 
@@ -228,16 +224,12 @@ export default function ComprehensiveReportPage() {
         toast({ title: "Periode Belum Dipilih", description: "Silakan pilih periode laporan terlebih dahulu.", variant: "warning"});
         return;
     }
-    console.log(`[CompReportPage] handleShowReport: Period=${selectedPeriodForReport}, Mode=${selectedViewMode}`);
     setReportSubmitted(true);
     setIsLoadingReportData(true);
-    setFlatTableData([]); // Clear previous table data
+    setFlatTableData([]); 
 
     try {
-        // Always trigger fetch; store will manage if data for this context is already loaded
         await triggerGlobalDataFetch(currentUserId, selectedPeriodForReport);
-        // The useEffect above will handle setting isLoadingReportData to false 
-        // and processing table data once all necessary store data is loaded.
     } catch (error) {
         console.error("[CompReportPage] Error triggering global data fetch:", error);
         toast({ title: "Gagal Memuat Data", description: "Terjadi kesalahan saat memulai pengambilan data laporan.", variant: "destructive"});
@@ -360,3 +352,5 @@ export default function ComprehensiveReportPage() {
     </div>
   );
 }
+
+    

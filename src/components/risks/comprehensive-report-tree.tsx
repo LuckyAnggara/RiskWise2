@@ -7,9 +7,9 @@ import { ComprehensiveReportTreeItem } from './comprehensive-report-tree-item';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface ComprehensiveReportTreeProps {
-  goals: Goal[]; // Goals are now passed directly, already filtered by period and user
+  goals: Goal[]; 
   userId: string;
-  period: string; // This should be the selectedPeriodForReport from the parent
+  period: string; 
 }
 
 export function ComprehensiveReportTree({ goals, userId, period }: ComprehensiveReportTreeProps) {
@@ -40,11 +40,13 @@ export function ComprehensiveReportTree({ goals, userId, period }: Comprehensive
             item={goal}
             itemType="goal"
             level={0}
-            userId={userId} // Pass down from props
-            period={period} // Pass down from props
+            userId={userId} 
+            period={period} 
           />
         ))}
       </CardContent>
     </Card>
   );
 }
+
+    

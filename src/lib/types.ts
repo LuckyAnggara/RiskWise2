@@ -1,4 +1,5 @@
 
+
 export const LIKELIHOOD_LEVELS_DESC_MAP = {
   "Hampir tidak terjadi (1)": 1,
   "Jarang terjadi (2)": 2,
@@ -37,11 +38,11 @@ export const RISK_CATEGORIES = [
 export type RiskCategory = typeof RISK_CATEGORIES[number];
 
 export const RISK_SCORE_HEATMAP: Record<number, Record<number, number>> = {
-  1: { 1: 1,  2: 3,  3: 5,  4: 8,  5: 20 }, // Hampir tidak terjadi (L1)
-  2: { 1: 2,  2: 7,  3: 11, 4: 13, 5: 21 }, // Jarang terjadi (L2)
-  3: { 1: 4,  2: 10, 3: 14, 4: 17, 5: 22 }, // Kadang Terjadi (L3)
-  4: { 1: 6,  2: 12, 3: 16, 4: 19, 5: 24 }, // Sering terjadi (L4)
-  5: { 1: 9,  2: 15, 3: 18, 4: 23, 5: 25 }, // Hampir pasti terjadi (L5)
+  1: { 1: 1,  2: 3,  3: 5,  4: 8,  5: 20 }, 
+  2: { 1: 2,  2: 7,  3: 11, 4: 13, 5: 21 }, 
+  3: { 1: 4,  2: 10, 3: 14, 4: 17, 5: 22 }, 
+  4: { 1: 6,  2: 12, 3: 16, 4: 19, 5: 24 }, 
+  5: { 1: 9,  2: 15, 3: 18, 4: 23, 5: 25 }, 
 };
 
 export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, impact: ImpactLevelDesc | null): { level: CalculatedRiskLevelCategory | 'N/A'; score: number | null } => {
@@ -51,14 +52,12 @@ export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, i
   const impactValue = IMPACT_LEVELS_DESC_MAP[impact];
 
   if (likelihoodValue === undefined || impactValue === undefined) {
-    console.warn(`[getCalculatedRiskLevel] Invalid likelihood or impact description: L=${likelihood}, I=${impact}`);
     return { level: 'N/A', score: null };
   }
   
   const score = RISK_SCORE_HEATMAP[likelihoodValue]?.[impactValue] ?? null;
 
   if (score === null) {
-    console.warn(`[getCalculatedRiskLevel] Score not found in heatmap for Likelihood: ${likelihood} (val: ${likelihoodValue}), Impact: ${impact} (val: ${impactValue})`);
     return { level: 'N/A', score }; 
   }
 
@@ -69,7 +68,6 @@ export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, i
   else if (score >= 6 && score <= 11) level = 'Rendah';    
   else if (score >= 1 && score <= 5) level = 'Sangat Rendah';
   else {
-    console.warn(`[getCalculatedRiskLevel] Score ${score} is out of defined risk level ranges.`);
     return { level: 'N/A', score }; 
   }
   return { level, score };
@@ -152,8 +150,8 @@ export interface RiskCause {
   impact: ImpactLevelDesc | null;
   createdAt: string; 
   analysisUpdatedAt?: string; 
-  potentialRiskCode?: string; // Added for display in monitoring
-  riskCauseCode?: string; // Added for display in monitoring
+  potentialRiskCode?: string; 
+  riskCauseCode?: string; 
 }
 
 export interface ControlMeasure {
@@ -195,8 +193,9 @@ export interface AppUser {
   updatedAt?: string; 
 }
 
-export const getControlTypeName = (typeKey: ControlMeasureTypeKey): string => {
-  return CONTROL_MEASURE_TYPES[typeKey];
+export const getControlTypeName = (typeKey: ControlMeasureTypeKey | null | undefined): string => {
+  if (!typeKey) return 'N/A';
+  return CONTROL_MEASURE_TYPES[typeKey] || 'Tidak Diketahui';
 };
 
 export type MonitoringPeriodFrequency = 'Bulanan' | 'Triwulanan' | 'Semesteran' | 'Tahunan';
@@ -225,7 +224,7 @@ export interface RiskExposure {
   period: string; 
   exposureValue: number | null; 
   exposureNotes: string | null;
-  isToleransiExceeded?: boolean | null; 
+  isToleranceNegative?: boolean | null;
   recordedAt: string; 
   updatedAt?: string; 
 }
@@ -253,3 +252,5 @@ export interface MonitoredControlMeasureData {
   recordedAt: string; 
   updatedAt?: string; 
 }
+
+    
