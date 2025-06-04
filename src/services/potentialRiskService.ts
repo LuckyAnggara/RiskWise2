@@ -27,7 +27,7 @@ import { deleteRiskCauseAndSubCollections } from './riskCauseService';
 export async function addPotentialRisk(
   data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'period' | 'userId' | 'uprId' | 'sequenceNumber' | 'goalId'>,
   goalId: string,
-  uprId: string, // ID UPR tempat data ini akan berada
+  uprId: string | null, // ID UPR tempat data ini akan berada
   period: string,
   creatorUserId: string, // UID pengguna yang membuat record ini
   sequenceNumber: number

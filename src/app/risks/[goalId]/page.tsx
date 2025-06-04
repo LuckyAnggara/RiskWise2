@@ -78,7 +78,7 @@ export default function GoalRisksPage() {
       const uniqueOwners = new Set<string>();
       const causeCounts: Record<string,number> = {};
 
-      if (currentGoalResult && currentGoalResult.userId === currentUprId && currentGoalResult.period === currentPeriod) {
+      if (currentGoalResult && currentGoalResult.uprId === currentUprId && currentGoalResult.period === currentPeriod) {
         setGoal(currentGoalResult);
         const currentPotentialRisks = await getPotentialRisksByGoalId(goalId, currentUprId, currentPeriod);
         setPotentialRisks(currentPotentialRisks);

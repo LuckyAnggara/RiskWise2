@@ -220,6 +220,7 @@ export default function ManagePotentialRiskPage() {
       return;
     }
     const currentUserId = currentUser.uid;
+    const currentUprId = appUser.uprId;
     const activePeriod = appUser.activePeriod;
 
     const parentGoal = goals.find(g => g.id === data.goalId);
@@ -243,7 +244,7 @@ export default function ManagePotentialRiskPage() {
           category: data.category === NO_CATEGORY_SENTINEL ? null : data.category,
           owner: data.owner || null,
         };
-        pRiskToSave = await addPotentialRisk(newPRData, parentGoal.id, currentUserId, activePeriod, newSequenceNumber);
+        pRiskToSave = await addPotentialRisk(newPRData, parentGoal.id, currentUprId,  activePeriod, currentUserId, newSequenceNumber);
         successMessage = `Potensi Risiko "${pRiskToSave.description}" (PR${pRiskToSave.sequenceNumber}) dibuat. Anda sekarang dapat menambahkan penyebabnya.`;
         setCurrentPotentialRisk(pRiskToSave);
         router.replace(`/all-risks/manage/${pRiskToSave.id}?from=${encodeURIComponent(defaultBackPath)}`);
@@ -287,6 +288,7 @@ export default function ManagePotentialRiskPage() {
         return;
     }
     const currentUserId = currentUser.uid;
+    const currentUprId = appUser.uprId;
     const activePeriod = appUser.activePeriod;
 
     try {
@@ -324,6 +326,7 @@ export default function ManagePotentialRiskPage() {
         return;
     }
     const currentUserId = currentUser.uid;
+    const currentUprId = appUser.uprId;
     const activePeriod = appUser.activePeriod;
 
     try {
@@ -372,6 +375,7 @@ export default function ManagePotentialRiskPage() {
       return;
     }
     const currentUserId = currentUser.uid;
+    const currentUprId = appUser.uprId;
     const activePeriod = appUser.activePeriod;
 
     try {
