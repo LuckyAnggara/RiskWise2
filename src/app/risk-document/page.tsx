@@ -22,6 +22,7 @@ export interface FlatReportItem {
   goalCode?: string;
   goalName?: string;
   goalDescription?: string;
+  goalll?:string;
 
   potentialRiskCode?: string;
   potentialRiskSequenceNumber?: number;
