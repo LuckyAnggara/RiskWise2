@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import NextLink from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTheme } from "next-themes";
@@ -27,7 +27,10 @@ import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useAppStore } from '@/stores/useAppStore'; // Import the store
+import { useAppStore, triggerGlobalDataFetchForStore } from '@/stores/useAppStore'; 
+import type { UPR } from '@/lib/types'; 
+// Placeholder for a UPR service - this would be created in a subsequent step
+// import { getUprById } from '@/services/uprService'; 
 
 const DEFAULT_FALLBACK_UPR_ID = 'Pengguna';
 const DEFAULT_PERIOD = new Date().getFullYear().toString();
@@ -39,50 +42,68 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
   
-  const setStoreAppContext = useAppStore(state => state.setAppContext);
-  const storeDataFetchedForPeriod = useAppStore(state => state.dataFetchedForPeriod);
+  const storeDataFetchedForUprPeriod = useAppStore(state => state.dataFetchedForUprPeriod);
   const resetStoreData = useAppStore(state => state.resetAllData);
 
-  const currentUprDisplay = appUser?.displayName || appUser?.uprId || DEFAULT_FALLBACK_UPR_ID;
-  const currentPeriodDisplay = appUser?.activePeriod || DEFAULT_PERIOD;
+  const [activeUprName, setActiveUprName] = useState<string | null>(null);
+
 
   useEffect(() => {
     console.log("[AppLayout] useEffect triggered. Loading:", loading, "CurrentUser:", !!currentUser, "AppUser:", !!appUser, "isProfileComplete:", isProfileComplete, "Pathname:", pathname);
     const publicPaths = ['/login', '/register'];
-    const settingsPath = '/settings';
+    const setupPath = '/profile-setup'; // Changed from settingsPath
     
     if (!loading) { 
-      if (currentUser) {
-        if (appUser && appUser.uid && appUser.activePeriod && isProfileComplete) {
-            console.log(`[AppLayout] AuthContext ready. Setting app context in Zustand: UID=${appUser.uid}, Period=${appUser.activePeriod}`);
-            setStoreAppContext(appUser.uid, appUser.activePeriod);
-        }
+      if (currentUser && appUser) { // currentUser and appUser must exist
+        // Trigger global data fetch if context is ready and profile is complete
+        if (isProfileComplete && appUser.assignedUprId && appUser.activePeriod) {
+          console.log(`[AppLayout] Profile complete. Calling triggerGlobalDataFetchForStore with UPR ID: ${appUser.assignedUprId}, Period: ${appUser.activePeriod}, User UID: ${currentUser.uid}`);
+          triggerGlobalDataFetchForStore(appUser.assignedUprId, appUser.activePeriod, currentUser.uid);
+          
+          // Placeholder for fetching UPR name - replace with actual service call
+          // For now, use assignedUprId or displayName if UPR name isn't fetched
+          if (appUser.role === 'userSatker' && appUser.assignedUprId) {
+            // async function fetchUprName() {
+            //   try {
+            //     const uprDoc = await getUprById(appUser.assignedUprId); // Assuming getUprById exists
+            //     if (uprDoc) setActiveUprName(uprDoc.name);
+            //     else setActiveUprName(appUser.assignedUprId); // Fallback to ID
+            //   } catch { setActiveUprName(appUser.assignedUprId); }
+            // }
+            // fetchUprName();
+            setActiveUprName(appUser.displayName || appUser.assignedUprId); // Temporary: use displayName or ID
+          } else if (appUser.role === 'admin' || appUser.role === 'auditor') {
+            setActiveUprName("Admin/Auditor View"); // Or some other indicator
+          }
 
-        if (!isProfileComplete && pathname !== settingsPath) {
-          console.log("[AppLayout] Profile incomplete, redirecting to /settings from", pathname);
-          router.push(settingsPath);
-        } else if (isProfileComplete && publicPaths.includes(pathname)) {
-          console.log("[AppLayout] Profile complete and on public path, redirecting to /");
+        } else if (!isProfileComplete && pathname !== setupPath) {
+          console.log("[AppLayout] Profile incomplete, redirecting to /profile-setup from", pathname);
+          router.push(setupPath);
+        }
+        
+        if (publicPaths.includes(pathname)) {
+          console.log("[AppLayout] User logged in and on public path, redirecting to /");
           router.push('/');
         }
-      } else {
-        if (!publicPaths.includes(pathname)) {
-          console.log("[AppLayout] User not logged in and not on public path, redirecting to /login from", pathname);
+
+      } else if (!currentUser) { // User not logged in
+        if (!publicPaths.includes(pathname) && pathname !== setupPath) { // Allow access to setup if somehow landed there pre-auth
+          console.log("[AppLayout] User not logged in and not on public/setup path, redirecting to /login from", pathname);
           router.push('/login');
         }
-        if (storeDataFetchedForPeriod !== null) {
+        if (storeDataFetchedForUprPeriod !== null) {
              console.log("[AppLayout] User logged out. Resetting Zustand store.");
              resetStoreData();
         }
       }
     }
-  }, [currentUser, appUser, loading, isProfileComplete, router, pathname, setStoreAppContext, storeDataFetchedForPeriod, resetStoreData]);
+  }, [currentUser, appUser, loading, isProfileComplete, router, pathname, storeDataFetchedForUprPeriod, resetStoreData]);
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
       toast({ title: 'Keluar Berhasil', description: 'Anda telah berhasil keluar.' });
-      router.push('/login');
+      router.push('/login'); // This will trigger resetStoreData via the useEffect above
     } catch (error) {
       console.error("Error logging out:", error);
       toast({ title: 'Gagal Keluar', description: 'Terjadi kesalahan saat keluar.', variant: 'destructive' });
@@ -100,15 +121,46 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   const isPublicPage = ['/login', '/register'].includes(pathname);
-  if (!currentUser && isPublicPage) {
+  const isSetupPage = pathname === '/profile-setup';
+
+  if (isPublicPage && !currentUser) {
     return <>{children}<Toaster /></>;
   }
   
-  if (!currentUser && !isPublicPage) {
+  // If user is logged in but profile is not complete, AND they are not on the setup page,
+  // they might be briefly shown before redirect. The useEffect will handle redirect.
+  // If they ARE on the setup page, let it render.
+  if (currentUser && !isProfileComplete && isSetupPage) {
+     return <>{children}<Toaster /></>;
+  }
+
+
+  // This check is to prevent rendering the main layout if redirects are pending
+  if (!currentUser && !isPublicPage && !isSetupPage) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
         <p className="text-xl text-muted-foreground">Mengarahkan ke halaman login...</p>
+        <Toaster />
+      </div>
+    );
+  }
+  if (currentUser && !isProfileComplete && !isSetupPage) {
+      return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+        <p className="text-xl text-muted-foreground">Mengarahkan ke pengaturan profil...</p>
+        <Toaster />
+      </div>
+    );
+  }
+  
+  // If currentUser exists but appUser is still null (profile is loading post-auth), show a loader
+  if (currentUser && !appUser) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+        <p className="text-xl text-muted-foreground">Memuat data profil pengguna...</p>
         <Toaster />
       </div>
     );
@@ -140,9 +192,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/80 px-4 backdrop-blur md:px-6">
           <div className="flex items-center gap-2">
             <SidebarTrigger className="md:hidden" />
-            {appUser && (
+            {appUser && isProfileComplete && (
               <div className="text-sm text-muted-foreground">
-                <span className="font-semibold">UPR:</span> {appUser.displayName || DEFAULT_FALLBACK_UPR_ID} | <span className="font-semibold">Periode:</span> {appUser.activePeriod || DEFAULT_PERIOD}
+                <span className="font-semibold">UPR:</span> {activeUprName || appUser.displayName || DEFAULT_FALLBACK_UPR_ID} | <span className="font-semibold">Periode:</span> {appUser.activePeriod || DEFAULT_PERIOD}
+              </div>
+            )}
+             {appUser && !isProfileComplete && (
+              <div className="text-sm text-destructive">
+                Profil belum lengkap.
               </div>
             )}
           </div>
@@ -197,14 +254,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <main className="flex-1 p-4 md:p-6">
-          {currentUser && !isProfileComplete && pathname !== '/settings' && (
+          {currentUser && !isProfileComplete && pathname !== '/profile-setup' && ( // Show alert if profile incomplete and not on setup page
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Profil Belum Lengkap!</AlertTitle>
               <AlertDescription>
-                Nama UPR dan Periode Awal Anda belum diatur. Harap lengkapi profil Anda di halaman 
-                <NextLink href="/settings" className="font-semibold underline hover:text-destructive-foreground/80 ml-1">
-                  Pengaturan
+                Konfigurasi UPR dan Periode awal Anda belum diatur. Harap lengkapi di halaman 
+                <NextLink href="/profile-setup" className="font-semibold underline hover:text-destructive-foreground/80 ml-1">
+                  Pengaturan Profil
                 </NextLink>
                 {' '}untuk dapat menggunakan fitur lain.
               </AlertDescription>
@@ -217,4 +274,3 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
-

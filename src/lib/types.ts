@@ -1,5 +1,4 @@
 
-
 export const LIKELIHOOD_LEVELS_DESC_MAP = {
   "Hampir tidak terjadi (1)": 1,
   "Jarang terjadi (2)": 2,
@@ -110,13 +109,24 @@ export const CONTROL_MEASURE_TYPES = {
 export type ControlMeasureTypeKey = keyof typeof CONTROL_MEASURE_TYPES;
 export const CONTROL_MEASURE_TYPE_KEYS = Object.keys(CONTROL_MEASURE_TYPES) as ControlMeasureTypeKey[];
 
+export interface UPR {
+  id: string;
+  name: string;
+  code: string; // Unique short code for the UPR
+  description?: string;
+  adminUserIds: string[]; // UIDs of users who can administer this UPR
+  memberUserIds: string[]; // UIDs of users who are members of this UPR
+  createdAt: string;
+  updatedAt?: string;
+}
 
 export interface Goal {
   id: string;
+  uprId: string; // ID of the UPR this goal belongs to
   name: string;
   description: string;
   code: string; 
-  userId: string; 
+  userId: string; // UID of the user who created/last modified this
   period: string; 
   createdAt: string; 
   updatedAt?: string; 
@@ -124,6 +134,7 @@ export interface Goal {
 
 export interface PotentialRisk {
   id: string;
+  uprId: string; 
   goalId: string;
   userId: string; 
   period: string; 
@@ -137,6 +148,7 @@ export interface PotentialRisk {
 
 export interface RiskCause {
   id: string;
+  uprId: string; 
   potentialRiskId: string;
   goalId: string; 
   userId: string; 
@@ -156,6 +168,7 @@ export interface RiskCause {
 
 export interface ControlMeasure {
   id: string;
+  uprId: string; 
   riskCauseId: string;
   potentialRiskId: string; 
   goalId: string; 
@@ -174,7 +187,7 @@ export interface ControlMeasure {
 }
 
 
-export type UserRole = 'admin' | 'userSatker';
+export type UserRole = 'admin' | 'auditor' | 'userSatker';
 
 export interface AppUser {
   uid: string;
@@ -182,7 +195,7 @@ export interface AppUser {
   displayName: string | null; 
   photoURL: string | null;
   role: UserRole;
-  uprId: string | null; 
+  assignedUprId: string | null; // ID of the UPR this user is assigned to (if role is userSatker)
   activePeriod: string | null;
   availablePeriods: string[] | null;
   riskAppetite?: number | null; 
@@ -205,8 +218,9 @@ export type MonitoringSessionStatus = 'Direncanakan' | 'Aktif' | 'Selesai';
 
 export interface MonitoringSession {
   id: string;
-  userId: string;
-  period: string; 
+  uprId: string; // UPR context for this session
+  userId: string; // User who created the session
+  period: string; // Application period when the session was created/is relevant for
   name: string; 
   startDate: string; 
   endDate: string; 
@@ -218,10 +232,11 @@ export interface MonitoringSession {
 
 export interface RiskExposure {
   id: string; 
+  uprId: string;
   monitoringSessionId: string;
   riskCauseId: string;
-  userId: string;
-  period: string; 
+  userId: string; // User who recorded this exposure
+  period: string; // Application period
   exposureValue: number | null; 
   exposureNotes: string | null;
   isToleranceNegative?: boolean | null;
@@ -239,11 +254,12 @@ export interface MonitoredRiskCauseView extends RiskCause {
 
 export interface MonitoredControlMeasureData {
   id: string; 
+  uprId: string;
   monitoringSessionId: string; 
   riskCauseId: string; 
   controlMeasureId: string; 
-  userId: string;
-  period: string; 
+  userId: string; // User who recorded this data
+  period: string; // Application period
   realizationKCI: string | null;
   isTargetNegative: boolean | null;
   controlPerformance: number | null;
@@ -253,4 +269,38 @@ export interface MonitoredControlMeasureData {
   updatedAt?: string; 
 }
 
-    
+export interface FlatReportItem {
+  uprCode?: string; // Added
+  uprName?: string; // Added
+  goalCode?: string;
+  goalName?: string;
+  goalDescription?: string;
+
+  potentialRiskCode?: string;
+  potentialRiskSequenceNumber?: number;
+  potentialRiskDescription?: string;
+  potentialRiskCategory?: RiskCategory | null;
+  potentialRiskOwner?: string | null;
+
+  riskCauseCode?: string;
+  riskCauseSequenceNumber?: number;
+  riskCauseDescription?: string;
+  riskCauseSource?: RiskSource;
+  riskCauseKRI?: string | null;
+  riskCauseTolerance?: string | null;
+  riskCauseLikelihood?: LikelihoodLevelDesc | null;
+  riskCauseImpact?: ImpactLevelDesc | null;
+  riskCauseLevel?: CalculatedRiskLevelCategory | 'N/A';
+  riskCauseScore?: number | null;
+
+  controlMeasureCode?: string;
+  controlMeasureSequenceNumber?: number;
+  controlMeasureDescription?: string;
+  controlMeasureType?: ControlMeasureTypeKey | null;
+  controlMeasureTypeName?: string | null;
+  controlMeasureKCI?: string | null;
+  controlMeasureTarget?: string | null;
+  controlMeasurePIC?: string | null;
+  controlMeasureDeadline?: string | null;
+  controlMeasureBudget?: number | null;
+}
