@@ -34,7 +34,7 @@ const DEFAULT_FALLBACK_UPR_ID = 'Pengguna';
 const DEFAULT_PERIOD = new Date().getFullYear().toString();
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { currentUser, appUser, loading, isProfileComplete, refreshAppUser } = useAuth();
+  const { currentUser, appUser, authContextLoading, profileLoading, isProfileComplete, refreshAppUser } = useAuth(); // Menggunakan authContextLoading
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
@@ -51,51 +51,58 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const activePeriodDisplay = useMemo(() => appUser?.activePeriod || DEFAULT_PERIOD, [appUser]);
 
   useEffect(() => {
-    console.log("[AppLayout] useEffect triggered. Loading:", loading, "CurrentUser:", !!currentUser, "AppUser:", !!appUser, "isProfileComplete:", isProfileComplete, "Pathname:", pathname);
+    console.log("[AppLayout] useEffect triggered. authContextLoading:", authContextLoading, "CurrentUser:", !!currentUser, "AppUser:", !!appUser, "isProfileComplete:", isProfileComplete, "Pathname:", pathname);
     const publicPaths = ['/login', '/register'];
     const setupPath = '/profile-setup';
     
-    if (!loading) { 
-      if (currentUser && appUser) {
-        // For actualUserId, we will use currentUser.uid as the actual authenticated user.
-        // For uprId context for data fetching, we use appUser.uprId for userSatker,
-        // and for admin/auditor, it could be a selected UPR or null (to fetch all, needs store/service changes).
-        // For now, if admin/auditor, uprId for data fetching will be based on their own 'uprId' which is like their personal space/identifier.
-        const uprIdForDataFetch = (appUser.role === 'userSatker' && appUser.assignedUprId) ? appUser.assignedUprId : appUser.uprId;
-
-        if (isProfileComplete && uprIdForDataFetch && appUser.activePeriod && currentUser.uid) {
-          console.log(`[AppLayout] Profile complete. Calling triggerGlobalDataFetchForStore with UPR ID: ${uprIdForDataFetch}, Period: ${appUser.activePeriod}, User UID (actual): ${currentUser.uid}`);
-          triggerGlobalDataFetchForStore(uprIdForDataFetch, appUser.activePeriod, currentUser.uid);
-        } else if (!isProfileComplete && pathname !== setupPath) {
-          console.log("[AppLayout] Profile incomplete, redirecting to /profile-setup from", pathname);
-          router.push(setupPath);
-        }
-        
-        if (publicPaths.includes(pathname)) {
-          console.log("[AppLayout] User logged in and on public path, redirecting to /");
-          router.push('/');
-        }
-
-      } else if (!currentUser) { 
+    if (!authContextLoading) { // Hanya jalankan logika setelah status auth awal selesai dicek
+      if (!currentUser) { // TIDAK ADA USER AKTIF
         if (!publicPaths.includes(pathname) && pathname !== setupPath) { 
-          console.log("[AppLayout] User not logged in and not on public/setup path, redirecting to /login from", pathname);
+          console.log("[AppLayout] No user session, redirecting to /login from", pathname);
           router.push('/login');
+          return; // Hentikan eksekusi lebih lanjut dari useEffect ini
         }
-        // Reset store only if it was previously populated (not null)
-        const currentStoreContext = useAppStore.getState().dataFetchedForUprPeriod;
-        if (currentStoreContext !== null) {
-             console.log("[AppLayout] User logged out or no user. Resetting Zustand store.");
-             resetStoreData();
+        // Reset store jika pengguna tidak ada DAN store sebelumnya punya konteks
+        if (useAppStore.getState().dataFetchedForUprPeriod !== null) {
+           console.log("[AppLayout] User logged out or no user. Resetting Zustand store.");
+           resetStoreData();
         }
+      } else { // ADA USER AKTIF (currentUser is not null)
+        if (appUser) { // appUser juga sudah termuat
+            const uprIdForDataFetch = (appUser.role === 'userSatker' && appUser.assignedUprId) ? appUser.assignedUprId : appUser.uprId;
+
+            if (isProfileComplete && uprIdForDataFetch && appUser.activePeriod && currentUser.uid) {
+              console.log(`[AppLayout] Profile complete. Calling triggerGlobalDataFetchForStore with UPR ID: ${uprIdForDataFetch}, Period: ${appUser.activePeriod}, User UID (actual): ${currentUser.uid}`);
+              triggerGlobalDataFetchForStore(uprIdForDataFetch, appUser.activePeriod, currentUser.uid);
+            } else if (!isProfileComplete && pathname !== setupPath) {
+              console.log("[AppLayout] Profile incomplete, redirecting to /profile-setup from", pathname);
+              router.push(setupPath);
+              return; // Hentikan eksekusi lebih lanjut
+            }
+            
+            if (publicPaths.includes(pathname)) {
+              console.log("[AppLayout] User logged in and on public path, redirecting to /");
+              router.push('/');
+              return; // Hentikan eksekusi lebih lanjut
+            }
+        } else if (!profileLoading) { // currentUser ada, tapi appUser masih null, dan profileLoading sudah false (artinya fetchAppUser gagal atau tidak ada doc)
+            // Ini adalah kondisi di mana profil Firestore belum ada, arahkan ke setup
+            if (pathname !== setupPath) {
+                console.log("[AppLayout] User exists, but appUser (Firestore doc) is null and not loading. Redirecting to /profile-setup from", pathname);
+                router.push(setupPath);
+                return;
+            }
+        }
+        // Jika appUser masih loading (profileLoading true), jangan lakukan apa-apa, tunggu sampai selesai.
       }
     }
-  }, [currentUser, appUser, loading, isProfileComplete, router, pathname, resetStoreData]);
+  }, [currentUser, appUser, authContextLoading, profileLoading, isProfileComplete, router, pathname, resetStoreData]);
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
       toast({ title: 'Keluar Berhasil', description: 'Anda telah berhasil keluar.' });
-      // resetStoreData(); // Moved to useEffect to ensure it happens after user becomes null
+      // resetStoreData(); // Sudah dihandle di useEffect utama saat currentUser menjadi null
       router.push('/login'); 
     } catch (error) {
       console.error("Error logging out:", error);
@@ -103,8 +110,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // More granular loading check for initial render
-  if (loading && !currentUser) { // If auth is still loading and no user yet, show main loader
+  // Tampilan loading global utama jika authContextLoading true
+  if (authContextLoading) {
      return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -117,7 +124,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const isPublicPage = ['/login', '/register'].includes(pathname);
   const isSetupPage = pathname === '/profile-setup';
 
-  // If user is not logged in and not on a public/setup page, delay rendering until redirect happens.
+  // Jika tidak ada user, dan berada di halaman yang memerlukan auth, tampilkan loading (akan diarahkan oleh useEffect)
   if (!currentUser && !isPublicPage && !isSetupPage) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
@@ -128,29 +135,28 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  // If user is logged in, but appUser is still loading (profile data fetch in progress), show loader.
-  // Also, if profile is incomplete and not on setup page, show loader (redirect is pending).
+  // Jika user ada, tapi profile Firestore (appUser) belum termuat atau belum lengkap dan bukan di setup page, tampilkan loading (akan diarahkan oleh useEffect)
   if (currentUser && (!appUser || (!isProfileComplete && !isSetupPage))) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-        <p className="text-xl text-muted-foreground">Memuat profil pengguna atau mengarahkan...</p>
-        <Toaster />
-      </div>
-    );
+    // Pengecualian jika appUser memang null karena user baru dan memang sedang di setup page
+    if(appUser === null && isSetupPage) {
+        // Lanjutkan render setup page
+    } else {
+        return (
+            <div className="flex flex-col items-center justify-center h-screen bg-background">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <p className="text-xl text-muted-foreground">Memuat profil pengguna atau mengarahkan...</p>
+                <Toaster />
+            </div>
+        );
+    }
   }
 
-  // If on public page, render only children (login/register forms)
-  if (isPublicPage) {
+  // Render halaman publik atau setup tanpa layout utama
+  if (isPublicPage || (isSetupPage && currentUser && !isProfileComplete)) {
     return <>{children}<Toaster /></>;
   }
   
-  // If on setup page and profile is not complete, render children (setup form)
-  if (isSetupPage && currentUser && !isProfileComplete) {
-     return <>{children}<Toaster /></>;
-  }
-  
-  // If we reach here, user is logged in, profile is complete (or being handled by setup page), so render full layout
+  // Jika semua kondisi terpenuhi (user ada, profile lengkap, bukan halaman publik/setup), render layout utama
   return (
     <SidebarProvider defaultOpen>
       <Sidebar variant="sidebar" collapsible="icon" side="left">
@@ -240,12 +246,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <AlertTitle>Profil Belum Lengkap!</AlertTitle>
               <AlertDescription>
                 Konfigurasi profil Anda belum lengkap. 
-                {appUser?.role === 'userSatker' && !appUser?.assignedUprId && ' Anda juga perlu menunggu penetapan UPR oleh Admin. '}
-                Harap lengkapi di halaman 
-                <NextLink href="/profile-setup" className="font-semibold underline hover:text-destructive-foreground/80 ml-1">
-                  Pengaturan Profil
+                {appUser?.role === 'userSatker' && !appUser?.assignedUprId && ' Anda mungkin perlu menunggu penetapan UPR oleh Admin jika peran Anda adalah User Satker. '}
+                Harap kunjungi halaman 
+                <NextLink href="/settings" className="font-semibold underline hover:text-destructive-foreground/80 ml-1">
+                  Pengaturan
                 </NextLink>
-                {' '}untuk dapat menggunakan fitur lain.
+                {' '}untuk memeriksa dan melengkapi profil.
               </AlertDescription>
             </Alert>
           )}

@@ -13,13 +13,13 @@ import { Loader2, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { updateUserProfileData } from '@/services/userService';
 import { AppLogo } from '@/components/icons';
-import { auth } from '@/lib/firebase/config'; // Import auth for Firebase Auth operations
-import { updateProfile as updateFirebaseAuthProfile } from 'firebase/auth'; // Renamed to avoid conflict
+import { auth } from '@/lib/firebase/config'; 
+import { updateProfile as updateFirebaseAuthProfile } from 'firebase/auth'; 
 
 const DEFAULT_INITIAL_PERIOD = new Date().getFullYear().toString();
 
 export default function ProfileSetupPage() {
-  const { currentUser, appUser, refreshAppUser, loading: authLoading, isProfileComplete } = useAuth();
+  const { currentUser, appUser, refreshAppUser, authContextLoading, isProfileComplete } = useAuth(); // Menggunakan authContextLoading
   const router = useRouter();
   const { toast } = useToast();
 
@@ -28,26 +28,38 @@ export default function ProfileSetupPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // If user is logged in and profile is already complete, redirect them away from setup.
-    if (!authLoading && currentUser && isProfileComplete) {
-      console.log("[ProfileSetupPage] Profile is complete (via context), redirecting to /");
-      router.replace('/');
-    } 
-    // If auth has finished and there's no user, redirect to login.
-    else if (!authLoading && !currentUser) {
-        console.log("[ProfileSetupPage] No user, redirecting to /login");
-        router.replace('/login');
-    }
-    // If user is logged in but profile is NOT complete, prefill displayName from Firebase Auth if appUser's displayName is not set yet
-    else if (currentUser && appUser && !appUser.displayName) {
-        setDisplayNameInput(currentUser.displayName || currentUser.email?.split('@')[0] || '');
-    }
-     // If appUser is already loaded, use its displayName
-    else if (currentUser && appUser && appUser.displayName) {
-        setDisplayNameInput(appUser.displayName);
+    if (!authContextLoading && !currentUser) { // Jika auth selesai dan tidak ada user
+      console.log("[ProfileSetupPage] No user session, redirecting to /login");
+      router.replace('/login');
+      return; // Hentikan eksekusi lebih lanjut di useEffect ini
     }
 
-  }, [currentUser, appUser, authLoading, isProfileComplete, router]);
+    if (!authContextLoading && currentUser && isProfileComplete) {
+      console.log("[ProfileSetupPage] Profile is complete via context, redirecting to /");
+      router.replace('/');
+      return; 
+    }
+    
+    // Pre-fill logic if user exists but profile is not complete
+    if (currentUser && !isProfileComplete) {
+        if (appUser && appUser.displayName) {
+            setDisplayNameInput(appUser.displayName);
+        } else if (currentUser.displayName) {
+            setDisplayNameInput(currentUser.displayName);
+        } else if (currentUser.email) {
+            setDisplayNameInput(currentUser.email.split('@')[0]);
+        } else {
+            setDisplayNameInput('');
+        }
+        // Untuk initialPeriodInput, biarkan default atau dari appUser jika ada dan profil belum lengkap
+        if (appUser && appUser.activePeriod) {
+            setInitialPeriodInput(appUser.activePeriod);
+        } else {
+            setInitialPeriodInput(DEFAULT_INITIAL_PERIOD);
+        }
+    }
+
+  }, [currentUser, appUser, authContextLoading, isProfileComplete, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +69,7 @@ export default function ProfileSetupPage() {
       return;
     }
     if (!displayNameInput.trim()) {
-      toast({ title: "Input Tidak Valid", description: "Nama UPR / Nama Lengkap harus diisi.", variant: "destructive" });
+      toast({ title: "Input Tidak Valid", description: "Nama UPR / Nama Pengguna harus diisi.", variant: "destructive" });
       return;
     }
     if (!initialPeriodInput.trim() || !/^\d{4}$/.test(initialPeriodInput.trim())) {
@@ -67,31 +79,29 @@ export default function ProfileSetupPage() {
 
     setIsSaving(true);
     try {
-      // Update Firebase Auth profile's displayName if it's different
       if (auth.currentUser && auth.currentUser.displayName !== displayNameInput.trim()) {
         await updateFirebaseAuthProfile(auth.currentUser, { displayName: displayNameInput.trim() });
         console.log("[ProfileSetupPage] Firebase Auth displayName updated.");
       }
       
-      const profileDataToSave: Partial<Pick<AppUser, "displayName" | "activePeriod" | "availablePeriods">> & {uprId?: string | null} = {
+      // Data yang disimpan ke Firestore
+      const profileDataToSave: Partial<Pick<AppUser, "displayName" | "activePeriod" | "availablePeriods">> = {
         displayName: displayNameInput.trim(),
         activePeriod: initialPeriodInput.trim(),
-        availablePeriods: [initialPeriodInput.trim()], // Start with only the initial period
+        availablePeriods: [initialPeriodInput.trim()],
+        // role dan assignedUprId akan di-set oleh sistem/admin atau default saat pertama kali dokumen dibuat di service jika tidak ada.
+        // uprId akan disinkronkan dengan displayName di userService
       };
-
-      // For userSatker, uprId will be the same as their displayName initially.
-      // assignedUprId will be null until an admin assigns them.
-      // For admin/auditor, uprId will also be their displayName (as a form of identifier), and assignedUprId remains null.
-      profileDataToSave.uprId = displayNameInput.trim();
 
       await updateUserProfileData(currentUser.uid, profileDataToSave);
       
-      await refreshAppUser(); // Crucial: Refresh appUser in context to update isProfileComplete
+      await refreshAppUser(); 
       toast({ title: "Profil Disimpan", description: "Pengaturan profil awal Anda telah berhasil disimpan." });
       
-      // After refreshAppUser, isProfileComplete should be re-evaluated by AuthContext.
-      // The useEffect above will then handle the redirect if the profile is now considered complete.
-      // No direct router.push('/') here to avoid race conditions with state updates.
+      // Redirect akan dihandle oleh useEffect di atas setelah isProfileComplete diperbarui
+      // Jika setelah refreshAppUser, isProfileComplete masih false (misal userSatker menunggu assignedUprId),
+      // pengguna akan tetap di halaman ini atau diarahkan oleh AppLayout ke halaman sesuai
+      // Ini mencegah asumsi redirect ke '/' jika profil belum sepenuhnya lengkap menurut definisi baru.
 
     } catch (error: any) {
       console.error("Error saving initial profile:", error);
@@ -101,7 +111,7 @@ export default function ProfileSetupPage() {
     }
   };
   
-  if (authLoading || (currentUser && !appUser && !isProfileComplete) ) { // Show loader if auth is loading OR if user is logged in but appUser/profile status is not yet determined
+  if (authContextLoading || (currentUser && !appUser && !isProfileComplete) ) { 
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -110,8 +120,8 @@ export default function ProfileSetupPage() {
     );
   }
 
-  // If still on this page and isProfileComplete became true (e.g., after refreshAppUser), the useEffect will redirect.
-  // This rendering is for when !isProfileComplete.
+  // Jika setelah semua loading selesai dan pengguna masih di sini, berarti profil memang belum lengkap.
+  // Tidak perlu redirect lagi dari sini jika isProfileComplete true karena useEffect sudah menangani.
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md shadow-xl">
