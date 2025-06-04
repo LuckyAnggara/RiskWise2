@@ -9,49 +9,13 @@ import { Label } from '@/components/ui/label';
 import { Loader2, ListTree, TableIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useAppStore } from '@/stores/useAppStore';
-import type { Goal, PotentialRisk, RiskCause, ControlMeasure, RiskCategory, RiskSource, LikelihoodLevelDesc, ImpactLevelDesc, CalculatedRiskLevelCategory, ControlMeasureTypeKey } from '@/lib/types';
-import { getCalculatedRiskLevel, getControlTypeName } from '@/lib/types';
+import type { Goal } from '@/lib/types';
 import { ComprehensiveReportTree } from '@/components/risks/comprehensive-report-tree';
-import { ComprehensiveReportTable } from '@/components/risks/comprehensive-report-table';
+// import { ComprehensiveReportTable } from '@/components/risks/comprehensive-report-table'; // Akan di-uncomment nanti
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from '@/hooks/use-toast';
-
-export interface FlatReportItem {
-  goalCode?: string;
-  goalName?: string;
-  goalDescription?: string;
-
-  potentialRiskCode?: string;
-  potentialRiskSequenceNumber?: number;
-  potentialRiskDescription?: string;
-  potentialRiskCategory?: RiskCategory | null;
-  potentialRiskOwner?: string | null;
-
-  riskCauseCode?: string;
-  riskCauseSequenceNumber?: number;
-  riskCauseDescription?: string;
-  riskCauseSource?: RiskSource;
-  riskCauseKRI?: string | null;
-  riskCauseTolerance?: string | null;
-  riskCauseLikelihood?: LikelihoodLevelDesc | null;
-  riskCauseImpact?: ImpactLevelDesc | null;
-  riskCauseLevel?: CalculatedRiskLevelCategory | 'N/A';
-  riskCauseScore?: number | null;
-
-  controlMeasureCode?: string;
-  controlMeasureSequenceNumber?: number;
-  controlMeasureDescription?: string;
-  controlMeasureType?: ControlMeasureTypeKey | null;
-  controlMeasureTypeName?: string | null;
-  controlMeasureKCI?: string | null;
-  controlMeasureTarget?: string | null;
-  controlMeasurePIC?: string | null;
-  controlMeasureDeadline?: string | null;
-  controlMeasureBudget?: number | null;
-}
-
 
 export default function ComprehensiveReportPage() {
   const { currentUser, appUser, loading: authLoading, isProfileComplete } = useAuth();
@@ -61,13 +25,7 @@ export default function ComprehensiveReportPage() {
   const store = useAppStore();
   const { 
     goals: goalsFromStore, 
-    potentialRisks: potentialRisksFromStore,
-    riskCauses: riskCausesFromStore,
-    controlMeasures: controlMeasuresFromStore,
     goalsLoading: goalsLoadingFromStore,
-    potentialRisksLoading: potentialRisksLoadingFromStore,
-    riskCausesLoading: riskCausesLoadingFromStore,
-    controlMeasuresLoading: controlMeasuresLoadingFromStore,
     triggerGlobalDataFetch,
     dataFetchedForPeriod: storeDataFetchedForPeriod
   } = store;
@@ -76,9 +34,8 @@ export default function ComprehensiveReportPage() {
   const [selectedViewMode, setSelectedViewMode] = useState<'tree' | 'table'>('tree');
   const [reportSubmitted, setReportSubmitted] = useState<boolean>(false);
   const [isLoadingReportData, setIsLoadingReportData] = useState<boolean>(false);
-  const [flatTableData, setFlatTableData] = useState<FlatReportItem[]>([]);
   
-  const currentUserId = useMemo(() => appUser?.uid, [appUser]);
+  const currentUserId = useMemo(() => appUser?.uid, [appUser]); // Menggunakan appUser.uid sebagai userId untuk UPR
   const availablePeriods = useMemo(() => appUser?.availablePeriods || [], [appUser]);
   const activePeriodFromAuth = useMemo(() => appUser?.activePeriod, [appUser]);
 
@@ -88,131 +45,17 @@ export default function ComprehensiveReportPage() {
     }
   }, [authLoading, currentUser, appUser, activePeriodFromAuth, selectedPeriodForReport]);
   
-  const processDataForTable = () => {
-    if (!selectedPeriodForReport || !currentUserId) return [];
-    
-    const processedData: FlatReportItem[] = [];
-    const relevantGoals = goalsFromStore.filter(g => g.userId === currentUserId && g.period === selectedPeriodForReport);
-
-    relevantGoals.forEach(goal => {
-      const relevantPRs = potentialRisksFromStore.filter(pr => pr.goalId === goal.id && pr.userId === currentUserId && pr.period === selectedPeriodForReport);
-      if (relevantPRs.length === 0) {
-        processedData.push({
-          goalCode: goal.code,
-          goalName: goal.name,
-          goalDescription: goal.description,
-        });
-        return;
-      }
-
-      relevantPRs.forEach(pr => {
-        const relevantRCs = riskCausesFromStore.filter(rc => rc.potentialRiskId === pr.id && rc.userId === currentUserId && rc.period === selectedPeriodForReport);
-        const prCode = `${goal.code || 'S?'}.PR${pr.sequenceNumber || '?'}`;
-        if (relevantRCs.length === 0) {
-          processedData.push({
-            goalCode: goal.code,
-            goalName: goal.name,
-            goalDescription: goal.description,
-            potentialRiskCode: prCode,
-            potentialRiskSequenceNumber: pr.sequenceNumber,
-            potentialRiskDescription: pr.description,
-            potentialRiskCategory: pr.category,
-            potentialRiskOwner: pr.owner,
-          });
-          return;
-        }
-
-        relevantRCs.forEach(rc => {
-          const { level: rcLevel, score: rcScore } = getCalculatedRiskLevel(rc.likelihood, rc.impact);
-          const rcCode = `${prCode}.PC${rc.sequenceNumber || '?'}`;
-          const relevantCMs = controlMeasuresFromStore.filter(cm => cm.riskCauseId === rc.id && cm.userId === currentUserId && cm.period === selectedPeriodForReport);
-
-          if (relevantCMs.length === 0) {
-            processedData.push({
-              goalCode: goal.code,
-              goalName: goal.name,
-              goalDescription: goal.description,
-              potentialRiskCode: prCode,
-              potentialRiskSequenceNumber: pr.sequenceNumber,
-              potentialRiskDescription: pr.description,
-              potentialRiskCategory: pr.category,
-              potentialRiskOwner: pr.owner,
-              riskCauseCode: rcCode,
-              riskCauseSequenceNumber: rc.sequenceNumber,
-              riskCauseDescription: rc.description,
-              riskCauseSource: rc.source,
-              riskCauseKRI: rc.keyRiskIndicator,
-              riskCauseTolerance: rc.riskTolerance,
-              riskCauseLikelihood: rc.likelihood,
-              riskCauseImpact: rc.impact,
-              riskCauseLevel: rcLevel,
-              riskCauseScore: rcScore,
-            });
-            return;
-          }
-
-          relevantCMs.forEach(cm => {
-            const cmCode = `${rcCode}.${cm.controlType}.${cm.sequenceNumber || '?'}`;
-            processedData.push({
-              goalCode: goal.code,
-              goalName: goal.name,
-              goalDescription: goal.description,
-              potentialRiskCode: prCode,
-              potentialRiskSequenceNumber: pr.sequenceNumber,
-              potentialRiskDescription: pr.description,
-              potentialRiskCategory: pr.category,
-              potentialRiskOwner: pr.owner,
-              riskCauseCode: rcCode,
-              riskCauseSequenceNumber: rc.sequenceNumber,
-              riskCauseDescription: rc.description,
-              riskCauseSource: rc.source,
-              riskCauseKRI: rc.keyRiskIndicator,
-              riskCauseTolerance: rc.riskTolerance,
-              riskCauseLikelihood: rc.likelihood,
-              riskCauseImpact: rc.impact,
-              riskCauseLevel: rcLevel,
-              riskCauseScore: rcScore,
-              controlMeasureCode: cmCode,
-              controlMeasureSequenceNumber: cm.sequenceNumber,
-              controlMeasureDescription: cm.description,
-              controlMeasureType: cm.controlType,
-              controlMeasureTypeName: getControlTypeName(cm.controlType),
-              controlMeasureKCI: cm.keyControlIndicator,
-              controlMeasureTarget: cm.target,
-              controlMeasurePIC: cm.responsiblePerson,
-              controlMeasureDeadline: cm.deadline,
-              controlMeasureBudget: cm.budget,
-            });
-          });
-        });
-      });
-    });
-    return processedData;
-  };
-
   useEffect(() => {
+    // Effect ini akan memantau perubahan setelah reportSubmitted dan loading store
     if (reportSubmitted && currentUserId && selectedPeriodForReport) {
       const uniqueId = `${currentUserId}|${selectedPeriodForReport}`;
-      const allDataLoaded = !goalsLoadingFromStore && !potentialRisksLoadingFromStore && !riskCausesLoadingFromStore && !controlMeasuresLoadingFromStore;
-      
-      if (storeDataFetchedForPeriod === uniqueId && allDataLoaded) {
-        if (selectedViewMode === 'table') {
-          console.log(`[CompReportPage] Processing data for table view for ${uniqueId}`);
-          const processedData = processDataForTable();
-          setFlatTableData(processedData);
-        }
+      // Cek apakah data untuk konteks ini sudah selesai dimuat dari store
+      if (storeDataFetchedForPeriod === uniqueId && !goalsLoadingFromStore) { // Ditambah !potentialRisksLoadingFromStore, dst. saat mode tabel diimplementasi
         setIsLoadingReportData(false);
         console.log(`[CompReportPage] Report data ready for ${uniqueId}.`);
-      } else if (storeDataFetchedForPeriod !== uniqueId && !isLoadingReportData) {
-        // Data might still be loading if triggerGlobalDataFetch was just called.
       }
     }
-  }, [
-    reportSubmitted, currentUserId, selectedPeriodForReport, selectedViewMode,
-    storeDataFetchedForPeriod, goalsLoadingFromStore, potentialRisksLoadingFromStore, 
-    riskCausesLoadingFromStore, controlMeasuresLoadingFromStore,
-    goalsFromStore, potentialRisksFromStore, riskCausesFromStore, controlMeasuresFromStore
-  ]);
+  }, [reportSubmitted, currentUserId, selectedPeriodForReport, storeDataFetchedForPeriod, goalsLoadingFromStore]);
 
 
   const handleShowReport = async () => {
@@ -226,15 +69,29 @@ export default function ComprehensiveReportPage() {
     }
     setReportSubmitted(true);
     setIsLoadingReportData(true);
-    setFlatTableData([]); 
 
     try {
-        await triggerGlobalDataFetch(currentUserId, selectedPeriodForReport);
+        // Jika data untuk periode ini belum pernah di-fetch atau berbeda dari yang sudah ada, fetch ulang.
+        const uniqueId = `${currentUserId}|${selectedPeriodForReport}`;
+        if (storeDataFetchedForPeriod !== uniqueId) {
+            console.log(`[CompReportPage] Triggering global data fetch for ${uniqueId} on report submission.`);
+            await triggerGlobalDataFetch(currentUserId, selectedPeriodForReport, currentUserId); // Pass currentUserId as actualUserId for now
+        } else {
+            // Data sudah ada, mungkin tidak perlu fetch ulang, kecuali jika ada mekanisme refresh
+            // Untuk saat ini, kita anggap data di store sudah up-to-date
+            console.log(`[CompReportPage] Data for ${uniqueId} already marked as fetched. Proceeding to render.`);
+            // Jika mode tree, data goals sudah cukup. Jika tabel, perlu semua data.
+            if (selectedViewMode === 'tree' && !goalsLoadingFromStore) {
+                setIsLoadingReportData(false);
+            }
+            // Untuk mode tabel, kita perlu menunggu semua data terkait (PR, RC, CM)
+            // Logika ini akan lebih kompleks dan ditambahkan saat implementasi mode tabel
+        }
     } catch (error) {
         console.error("[CompReportPage] Error triggering global data fetch:", error);
         toast({ title: "Gagal Memuat Data", description: "Terjadi kesalahan saat memulai pengambilan data laporan.", variant: "destructive"});
         setIsLoadingReportData(false);
-        setReportSubmitted(false);
+        setReportSubmitted(false); // Reset agar pengguna bisa mencoba lagi
     }
   };
   
@@ -243,7 +100,7 @@ export default function ComprehensiveReportPage() {
     return goalsFromStore.filter(g => g.userId === currentUserId && g.period === selectedPeriodForReport);
   }, [goalsFromStore, selectedPeriodForReport, currentUserId]);
 
-  if (authLoading || (currentUser && !appUser) ) {
+  if (authLoading || (currentUser && !appUser) ) { // Menunggu appUser terisi
     return (
       <div className="flex flex-col items-center justify-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -331,20 +188,23 @@ export default function ComprehensiveReportPage() {
             <ComprehensiveReportTree 
               goals={goalsForSelectedPeriod} 
               userId={currentUserId} 
-              period={selectedPeriodForReport}
+              period={selectedPeriodForReport} // Gunakan selectedPeriodForReport untuk konsistensi
             />
           )}
           {selectedViewMode === 'table' && (
-             <ComprehensiveReportTable data={flatTableData} period={selectedPeriodForReport} />
+            <Card>
+              <CardHeader>
+                <CardTitle>Laporan Tabel Datar - Periode: {selectedPeriodForReport}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">Mode tabel datar akan diimplementasikan selanjutnya.</p>
+                {/* Placeholder untuk <ComprehensiveReportTable data={flatTableData} /> */}
+              </CardContent>
+            </Card>
           )}
            {!isLoadingReportData && goalsForSelectedPeriod.length === 0 && selectedViewMode === 'tree' && (
              <div className="text-center py-10 border-2 border-dashed border-muted-foreground/30 rounded-lg">
-              <p className="text-muted-foreground">Tidak ada data sasaran ditemukan untuk periode {selectedPeriodForReport} pada UPR ini untuk ditampilkan dalam mode hierarki.</p>
-            </div>
-           )}
-           {!isLoadingReportData && flatTableData.length === 0 && selectedViewMode === 'table' && (
-             <div className="text-center py-10 border-2 border-dashed border-muted-foreground/30 rounded-lg">
-              <p className="text-muted-foreground">Tidak ada data yang dapat ditampilkan dalam mode tabel datar untuk periode {selectedPeriodForReport} pada UPR ini, atau semua data belum termuat sepenuhnya.</p>
+              <p className="text-muted-foreground">Tidak ada data sasaran ditemukan untuk periode {selectedPeriodForReport} pada UPR ini.</p>
             </div>
            )}
         </>

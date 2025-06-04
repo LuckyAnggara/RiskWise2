@@ -7,9 +7,9 @@ import { ComprehensiveReportTreeItem } from './comprehensive-report-tree-item';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface ComprehensiveReportTreeProps {
-  goals: Goal[]; 
+  goals: Goal[]; // Menerima goals yang sudah difilter berdasarkan periode
   userId: string;
-  period: string; 
+  period: string; // Periode laporan yang sedang ditampilkan
 }
 
 export function ComprehensiveReportTree({ goals, userId, period }: ComprehensiveReportTreeProps) {
@@ -40,8 +40,8 @@ export function ComprehensiveReportTree({ goals, userId, period }: Comprehensive
             item={goal}
             itemType="goal"
             level={0}
-            userId={userId} 
-            period={period} 
+            userId={userId} // Tetap teruskan userId dari context
+            period={period} // Teruskan periode laporan yang dipilih
           />
         ))}
       </CardContent>
