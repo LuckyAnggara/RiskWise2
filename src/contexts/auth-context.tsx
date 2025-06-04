@@ -37,32 +37,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("[AuthContext] fetchAppUser: AppUser data from Firestore:", JSON.stringify(userDoc));
         if (userDoc) {
           setAppUser(userDoc);
-          let profileIsComplete = !!(userDoc.displayName && userDoc.activePeriod && userDoc.availablePeriods && userDoc.availablePeriods.length > 0);
-          if (userDoc.role === 'userSatker' && !userDoc.assignedUprId) {
-            profileIsComplete = false; // userSatker must have an assigned UPR
+          let profileIsConsideredComplete = !!(
+            userDoc.displayName &&
+            userDoc.activePeriod &&
+            userDoc.availablePeriods &&
+            userDoc.availablePeriods.length > 0 &&
+            userDoc.uprId // UprId should be same as displayName for non-admin/auditor, or assigned for userSatker
+          );
+
+          if (userDoc.role === 'userSatker') {
+            profileIsConsideredComplete = profileIsConsideredComplete && !!userDoc.assignedUprId;
           }
-          setIsProfileComplete(profileIsComplete);
-          console.log("[AuthContext] fetchAppUser: Profile complete status:", profileIsComplete, "Role:", userDoc.role, "AssignedUPR:", userDoc.assignedUprId);
+          // Admin and Auditor don't need assignedUprId to be considered complete for basic operations.
+          // Specific UPR selection for admin/auditor is a separate UI concern.
+
+          setIsProfileComplete(profileIsConsideredComplete);
+          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Role:", userDoc.role, "AssignedUPR:", userDoc.assignedUprId);
         } else {
-          // User exists in Firebase Auth but not in Firestore users collection (new user, or error)
-          // Set a default appUser structure and mark profile as incomplete
-          setAppUser({
+          // New user or Firestore doc missing, profile is incomplete.
+          setAppUser({ // Set a base AppUser structure
             uid: user.uid,
             email: user.email,
-            displayName: user.displayName || null, // Firebase Auth displayName or null
+            displayName: user.displayName || null,
             photoURL: user.photoURL || null,
-            role: 'userSatker', // Default role for new users
-            assignedUprId: null, // Will be set during profile setup or by admin
-            activePeriod: null, // Will be set during profile setup
-            availablePeriods: [], // Will be set during profile setup
-            createdAt: new Date().toISOString(), // Or serverTimestamp if setting up a new doc
+            role: 'userSatker', // Default for new sign-ups
+            uprId: null, // Will be set based on displayName or assignment
+            assignedUprId: null,
+            activePeriod: null,
+            availablePeriods: [],
+            createdAt: new Date().toISOString(),
           });
           setIsProfileComplete(false);
-          console.log("[AuthContext] fetchAppUser: No Firestore doc or initial setup needed, profile set to incomplete.");
+          console.log("[AuthContext] fetchAppUser: No Firestore doc, profile set to incomplete for UID:", user.uid);
         }
       } catch (error: any) {
         const errorMessage = error.message && typeof error.message === 'string' ? error.message : String(error);
-        console.error("[AuthContext] fetchAppUser: Failed to fetch/create AppUser from Firestore:", errorMessage);
+        console.error("[AuthContext] fetchAppUser: Failed to fetch/create AppUser from Firestore for UID:", user.uid, "Error:", errorMessage);
         setAppUser(null);
         setIsProfileComplete(false);
       } finally {
@@ -100,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAppUser = useCallback(async () => {
     if (currentUser) {
       console.log(`[AuthContext] refreshAppUser called for UID: ${currentUser.uid}`);
-      await fetchAppUser(currentUser); // Re-use fetchAppUser logic
+      await fetchAppUser(currentUser); 
     } else {
       console.log("[AuthContext] refreshAppUser: No current user, skipping refresh.");
       setAppUser(null);
@@ -110,17 +120,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser, fetchAppUser]);
 
   const isLoadingOverall = authLoading || profileLoading;
-
-  if (authLoading) { 
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-        <p className="text-xl text-muted-foreground">
-          Memverifikasi sesi...
-        </p>
-      </div>
-    );
-  }
   
   return (
     <AuthContext.Provider value={{ currentUser, appUser, loading: isLoadingOverall, profileLoading, isProfileComplete, refreshAppUser }}>

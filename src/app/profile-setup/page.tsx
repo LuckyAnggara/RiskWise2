@@ -13,30 +13,41 @@ import { Loader2, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { updateUserProfileData } from '@/services/userService';
 import { AppLogo } from '@/components/icons';
+import { auth } from '@/lib/firebase/config'; // Import auth for Firebase Auth operations
+import { updateProfile as updateFirebaseAuthProfile } from 'firebase/auth'; // Renamed to avoid conflict
 
 const DEFAULT_INITIAL_PERIOD = new Date().getFullYear().toString();
 
 export default function ProfileSetupPage() {
-  const { currentUser, appUser, refreshAppUser, loading: authLoading } = useAuth();
+  const { currentUser, appUser, refreshAppUser, loading: authLoading, isProfileComplete } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
-  const [uprName, setUprName] = useState('');
-  const [initialPeriod, setInitialPeriod] = useState(DEFAULT_INITIAL_PERIOD);
+  const [displayNameInput, setDisplayNameInput] = useState('');
+  const [initialPeriodInput, setInitialPeriodInput] = useState(DEFAULT_INITIAL_PERIOD);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // Jika pengguna sudah login dan profilnya sudah lengkap, arahkan ke dashboard
-    if (!authLoading && currentUser && appUser && appUser.displayName && appUser.uprId && appUser.activePeriod && appUser.availablePeriods && appUser.availablePeriods.length > 0) {
-      console.log("[ProfileSetupPage] Profile sudah lengkap, mengarahkan ke /");
+    // If user is logged in and profile is already complete, redirect them away from setup.
+    if (!authLoading && currentUser && isProfileComplete) {
+      console.log("[ProfileSetupPage] Profile is complete (via context), redirecting to /");
       router.replace('/');
-    }
-    // Jika pengguna belum login sama sekali (seharusnya tidak terjadi karena AppLayout akan redirect ke login dulu)
+    } 
+    // If auth has finished and there's no user, redirect to login.
     else if (!authLoading && !currentUser) {
-        console.log("[ProfileSetupPage] Tidak ada pengguna, mengarahkan ke /login");
+        console.log("[ProfileSetupPage] No user, redirecting to /login");
         router.replace('/login');
     }
-  }, [currentUser, appUser, authLoading, router]);
+    // If user is logged in but profile is NOT complete, prefill displayName from Firebase Auth if appUser's displayName is not set yet
+    else if (currentUser && appUser && !appUser.displayName) {
+        setDisplayNameInput(currentUser.displayName || currentUser.email?.split('@')[0] || '');
+    }
+     // If appUser is already loaded, use its displayName
+    else if (currentUser && appUser && appUser.displayName) {
+        setDisplayNameInput(appUser.displayName);
+    }
+
+  }, [currentUser, appUser, authLoading, isProfileComplete, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,25 +56,43 @@ export default function ProfileSetupPage() {
       router.push('/login');
       return;
     }
-    if (!uprName.trim()) {
+    if (!displayNameInput.trim()) {
       toast({ title: "Input Tidak Valid", description: "Nama UPR / Nama Lengkap harus diisi.", variant: "destructive" });
       return;
     }
-    if (!/^\d{4}$/.test(initialPeriod.trim())) {
+    if (!initialPeriodInput.trim() || !/^\d{4}$/.test(initialPeriodInput.trim())) {
       toast({ title: "Format Periode Tidak Valid", description: "Tahun periode awal harus format YYYY (misalnya, 2024).", variant: "destructive" });
       return;
     }
 
     setIsSaving(true);
     try {
-      await updateUserProfileData(currentUser.uid, {
-        displayName: uprName.trim(), // Ini juga akan mengatur uprId di userService
-        activePeriod: initialPeriod.trim(),
-        availablePeriods: [initialPeriod.trim()],
-      });
-      await refreshAppUser(); // PENTING: Refresh appUser di context
+      // Update Firebase Auth profile's displayName if it's different
+      if (auth.currentUser && auth.currentUser.displayName !== displayNameInput.trim()) {
+        await updateFirebaseAuthProfile(auth.currentUser, { displayName: displayNameInput.trim() });
+        console.log("[ProfileSetupPage] Firebase Auth displayName updated.");
+      }
+      
+      const profileDataToSave: Partial<Pick<AppUser, "displayName" | "activePeriod" | "availablePeriods">> & {uprId?: string | null} = {
+        displayName: displayNameInput.trim(),
+        activePeriod: initialPeriodInput.trim(),
+        availablePeriods: [initialPeriodInput.trim()], // Start with only the initial period
+      };
+
+      // For userSatker, uprId will be the same as their displayName initially.
+      // assignedUprId will be null until an admin assigns them.
+      // For admin/auditor, uprId will also be their displayName (as a form of identifier), and assignedUprId remains null.
+      profileDataToSave.uprId = displayNameInput.trim();
+
+      await updateUserProfileData(currentUser.uid, profileDataToSave);
+      
+      await refreshAppUser(); // Crucial: Refresh appUser in context to update isProfileComplete
       toast({ title: "Profil Disimpan", description: "Pengaturan profil awal Anda telah berhasil disimpan." });
-      router.push('/'); // Arahkan ke dashboard
+      
+      // After refreshAppUser, isProfileComplete should be re-evaluated by AuthContext.
+      // The useEffect above will then handle the redirect if the profile is now considered complete.
+      // No direct router.push('/') here to avoid race conditions with state updates.
+
     } catch (error: any) {
       console.error("Error saving initial profile:", error);
       toast({ title: "Gagal Menyimpan Profil", description: error.message || "Terjadi kesalahan saat menyimpan profil.", variant: "destructive" });
@@ -72,9 +101,7 @@ export default function ProfileSetupPage() {
     }
   };
   
-  // Menampilkan loading jika auth masih loading ATAU jika appUser masih null setelah auth selesai (menunggu fetchAppUser)
-  // ATAU jika profile sudah lengkap (menunggu redirect)
-  if (authLoading || (currentUser && !appUser) || (appUser && appUser.displayName && appUser.activePeriod)) {
+  if (authLoading || (currentUser && !appUser && !isProfileComplete) ) { // Show loader if auth is loading OR if user is logged in but appUser/profile status is not yet determined
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -83,38 +110,39 @@ export default function ProfileSetupPage() {
     );
   }
 
-
+  // If still on this page and isProfileComplete became true (e.g., after refreshAppUser), the useEffect will redirect.
+  // This rendering is for when !isProfileComplete.
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader className="space-y-1 text-center">
           <AppLogo className="mx-auto h-12 w-12 text-primary mb-2" />
           <CardTitle className="text-2xl">Lengkapi Profil Anda</CardTitle>
-          <CardDescription>Silakan isi nama UPR/Nama Lengkap dan periode awal Anda untuk melanjutkan.</CardDescription>
+          <CardDescription>Silakan isi nama UPR/Nama Pengguna dan periode awal Anda untuk melanjutkan.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-1.5">
-              <Label htmlFor="uprName">Nama UPR / Nama Lengkap Anda</Label>
+              <Label htmlFor="displayNameInput">Nama UPR / Nama Pengguna Anda</Label>
               <Input
-                id="uprName"
+                id="displayNameInput"
                 type="text"
-                placeholder="Masukkan Nama UPR atau Nama Lengkap Anda"
-                value={uprName}
-                onChange={(e) => setUprName(e.target.value)}
+                placeholder="Masukkan Nama UPR atau Nama Pengguna Anda"
+                value={displayNameInput}
+                onChange={(e) => setDisplayNameInput(e.target.value)}
                 required
                 disabled={isSaving}
               />
-              <p className="text-xs text-muted-foreground">Nama ini akan digunakan sebagai identitas UPR Anda.</p>
+              <p className="text-xs text-muted-foreground">Nama ini akan digunakan sebagai identitas UPR Anda dan nama tampilan.</p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="initialPeriod">Tahun Periode Awal</Label>
+              <Label htmlFor="initialPeriodInput">Tahun Periode Awal</Label>
               <Input
-                id="initialPeriod"
+                id="initialPeriodInput"
                 type="text"
                 placeholder="YYYY (misalnya, 2024)"
-                value={initialPeriod}
-                onChange={(e) => setInitialPeriod(e.target.value)}
+                value={initialPeriodInput}
+                onChange={(e) => setInitialPeriodInput(e.target.value)}
                 required
                 pattern="\d{4}"
                 title="Masukkan tahun dalam format YYYY"
