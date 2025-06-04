@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import NextLink from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTheme } from "next-themes";
@@ -44,25 +44,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const resetStoreData = useAppStore(state => state.resetAllData);
 
   const activeUprDisplay = useMemo(() => {
-    if (appUser?.role === 'admin' || appUser?.role === 'auditor') return "Admin/Auditor View";
+    // if (appUser?.role === 'admin' || appUser?.role === 'auditor') return "Admin/Auditor View"; // Logic for admin view if needed
     return appUser?.displayName || DEFAULT_FALLBACK_UPR_ID;
   }, [appUser]);
   
   const activePeriodDisplay = useMemo(() => appUser?.activePeriod || DEFAULT_PERIOD, [appUser]);
 
   const publicPaths = ['/login', '/register'];
+  const settingsPath = '/settings';
 
   useEffect(() => {
     console.log("[AppLayout] useEffect triggered. States:", { authContextLoading, profileLoading, currentUser: !!currentUser, appUser: !!appUser, isProfileComplete, pathname });
 
     if (authContextLoading) {
-      console.log("[AppLayout] Auth context is loading. No redirect action from useEffect.");
+      console.log("[AppLayout] Auth context is loading. No redirect action.");
       return;
     }
 
     if (!currentUser) {
       if (!publicPaths.includes(pathname)) {
-        console.log("[AppLayout] No user, not on public path. Redirecting to /login from", pathname);
+        console.log(`[AppLayout] No user, not on public path (${pathname}). Redirecting to /login.`);
         router.replace('/login');
       }
       if (storeDataFetchedForUprPeriod !== null) {
@@ -72,48 +73,49 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // currentUser exists, now wait for profileLoading to finish
+    // currentUser exists, now handle profile loading and completion
     if (profileLoading) {
-      console.log("[AppLayout] User exists, but profile is loading. No redirect action from useEffect.");
-      return;
-    }
-
-    // authContextLoading is false, currentUser exists, profileLoading is false
-    // appUser and isProfileComplete should have their final values
-    if (publicPaths.includes(pathname)) {
-      console.log("[AppLayout] On public path, but user logged in. Redirecting to / from", pathname);
-      router.replace('/');
+      console.log("[AppLayout] User exists, but profile is loading. No redirect action.");
       return;
     }
     
-    // At this point, user is logged in and not on a public path.
-    // Profile loading is also complete.
-    if (!isProfileComplete) {
-      // Profile is not complete. App will render, but sidebar nav is restricted.
-      // Alert will be shown. Data fetching for store might be skipped or limited.
-      console.log("[AppLayout] User profile is not complete. Path:", pathname, "UPR ID:", appUser?.uprId, "Active Period:", appUser?.activePeriod);
-      // If store has data for a different context, reset it.
-      const currentContextIdentifier = `${appUser?.uprId || 'UNKNOWN_UPR'}|${appUser?.activePeriod || 'UNKNOWN_PERIOD'}`;
-      if (storeDataFetchedForUprPeriod !== null && storeDataFetchedForUprPeriod !== currentContextIdentifier) {
-        console.log(`[AppLayout] Profile incomplete or context changed, resetting store. Old context: ${storeDataFetchedForUprPeriod}, New potential (partial) context: ${currentContextIdentifier}`);
-        resetStoreData();
-      }
-      // No redirect to /profile-setup from here anymore. User should go to /settings.
-    } else {
-      // Profile is complete. Fetch data.
+    // At this point: authContextLoading = false, currentUser exists, profileLoading = false.
+    // appUser and isProfileComplete have their final values.
+
+    if (publicPaths.includes(pathname)) {
+      console.log(`[AppLayout] On public path (${pathname}), but user logged in. Redirecting to /.`);
+      router.replace('/');
+      return;
+    }
+
+    // Core logic: If profile is not complete, and user is not on settings page, redirect to settings.
+    if (!isProfileComplete && pathname !== settingsPath) {
+      console.log(`[AppLayout] User profile is not complete (uprId: ${appUser?.uprId}, activePeriod: ${appUser?.activePeriod}). Redirecting from ${pathname} to ${settingsPath}.`);
+      router.replace(settingsPath);
+      return;
+    }
+    
+    // If profile is complete, handle data fetching for the store
+    if (isProfileComplete) {
       console.log("[AppLayout] User authenticated and profile complete. Path:", pathname, "UPR ID:", appUser?.uprId, "Active Period:", appUser?.activePeriod);
       
-      let uprIdForDataFetch = appUser?.uprId;
-      if (appUser?.role === 'userSatker' && appUser?.assignedUprId) {
-        uprIdForDataFetch = appUser.assignedUprId;
-      } else if ((appUser?.role === 'admin' || appUser?.role === 'auditor') && !appUser?.uprId) {
-          console.warn(`[AppLayout] Admin/Auditor user ${currentUser.uid} does not have a default UPR. Store data fetch may be limited or require UPR selection UI.`);
-          uprIdForDataFetch = null;
-      }
+      let uprIdForDataFetch = appUser?.uprId; // For userSatker, uprId IS their displayName/unique UPR
+      // Logic for admin/auditor to select UPR would go here if implemented
+      // if ((appUser?.role === 'admin' || appUser?.role === 'auditor') && !appUser?.uprId) {
+      //     console.warn(`[AppLayout] Admin/Auditor user ${currentUser.uid} does not have a default UPR. Store data fetch may be limited or require UPR selection UI.`);
+      //     uprIdForDataFetch = null; 
+      // }
 
       if (uprIdForDataFetch && appUser?.activePeriod && currentUser.uid) {
          console.log(`[AppLayout] Triggering global data fetch for UPR ID: ${uprIdForDataFetch}, Period: ${appUser.activePeriod}, Actual User: ${currentUser.uid}`);
-         triggerGlobalDataFetchForStore(uprIdForDataFetch, appUser.activePeriod, currentUser.uid);
+         // Check if the context for data fetch has actually changed
+         const newContextIdentifier = `${uprIdForDataFetch}|${appUser.activePeriod}`;
+         if (storeDataFetchedForUprPeriod !== newContextIdentifier) {
+           console.log(`[AppLayout] Context changed or data not fetched. Old: ${storeDataFetchedForUprPeriod}, New: ${newContextIdentifier}. Fetching.`);
+           triggerGlobalDataFetchForStore(uprIdForDataFetch, appUser.activePeriod, currentUser.uid);
+         } else {
+           console.log(`[AppLayout] Data already fetched for context: ${newContextIdentifier}. Skipping fetch.`);
+         }
       } else if (!uprIdForDataFetch && (appUser?.role === 'admin' || appUser?.role === 'auditor')) {
          console.log(`[AppLayout] Admin/Auditor - Global data fetch depends on UPR selection UI. Resetting store if context is invalid.`);
          if (storeDataFetchedForUprPeriod !== null) resetStoreData(); 
@@ -124,17 +126,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
 
   }, [currentUser, appUser, authContextLoading, profileLoading, isProfileComplete, router, pathname, resetStoreData, storeDataFetchedForUprPeriod]);
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      toast({ title: "Logout Berhasil", description: "Anda telah berhasil keluar." });
-      // Redirect is handled by useEffect based on currentUser becoming null
-    } catch (error) {
-      console.error("Error signing out: ", error);
-      toast({ title: "Logout Gagal", description: "Terjadi kesalahan saat keluar.", variant: "destructive" });
-    }
-  };
 
   // --- Render Logic ---
   const mainLoaderVisible = authContextLoading || (currentUser && profileLoading);
@@ -151,25 +142,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  // User not logged in, and not on a public path already (handled by useEffect)
-  // This mainly catches the case for initial render if useEffect hasn't redirected yet
-  if (!currentUser && !publicPaths.includes(pathname)) {
-     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-        <p className="text-xl text-muted-foreground">Mengarahkan ke login...</p>
-        <Toaster />
-      </div>
-    );
-  }
-
-  // If user is not logged in but on a public path (login/register), render children directly
   if (!currentUser && publicPaths.includes(pathname)) {
     return <>{children}<Toaster /></>;
   }
 
-  // If user is logged in, render the main app layout
-  if (currentUser) {
+  // If execution reaches here, it means:
+  // - authContextLoading is false.
+  // - profileLoading is false.
+  // - currentUser might be null (handled by redirect in useEffect) or present.
+  // - isProfileComplete might be true or false.
+  // - pathname determines what to show.
+
+  if (currentUser) { // User is logged in
+    if (!isProfileComplete && pathname !== settingsPath) {
+      // This case should be caught by useEffect redirect, but as a fallback, show a minimal loader.
+      // This prevents rendering the main layout if the redirect hasn't happened yet.
+      return (
+        <div className="flex flex-col items-center justify-center h-screen bg-background">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+          <p className="text-xl text-muted-foreground">Mengarahkan ke Pengaturan Profil...</p>
+          <Toaster />
+        </div>
+      );
+    }
+
+    // If profile is incomplete AND we are on settingsPath, or profile is complete for any path (not public)
+    // Then render the main layout or the settings page itself.
     return (
       <SidebarProvider defaultOpen>
         <Sidebar variant="sidebar" collapsible="icon" side="left">
@@ -253,18 +251,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
           <main className="flex-1 p-4 md:p-6">
-            {currentUser && appUser && !isProfileComplete && ( 
+            {currentUser && appUser && !isProfileComplete && pathname !== settingsPath && ( 
               <Alert variant="destructive" className="mb-4">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Profil Belum Lengkap!</AlertTitle>
                 <AlertDescription>
                   Konfigurasi profil Anda belum lengkap. 
-                  {(appUser?.role === 'userSatker' && !appUser?.assignedUprId) && ' Anda mungkin perlu menunggu penetapan UPR oleh Admin. '}
                   Harap kunjungi halaman 
                   <NextLink href="/settings" className="font-semibold underline hover:text-destructive-foreground/80 ml-1">
                     Pengaturan
                   </NextLink>
-                  {' '}untuk memeriksa dan melengkapi profil, atau hubungi Admin jika diperlukan. Beberapa fitur mungkin terbatas.
+                  {' '}untuk memeriksa dan melengkapi profil. Beberapa fitur mungkin terbatas.
                 </AlertDescription>
               </Alert>
             )}
@@ -276,8 +273,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Fallback if no condition above is met (e.g., unexpected state)
-  console.log("[AppLayout] Fallback Loader (final): Should not be reached often. States:", { authContextLoading, profileLoading, currentUser:!!currentUser, isProfileComplete, pathname });
+  // Fallback if no user and not on public path (should be caught by useEffect redirect to /login)
+  console.log("[AppLayout] Fallback Loader (final). Pathname:", pathname);
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -286,5 +283,5 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
+    
     
