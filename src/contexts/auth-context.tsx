@@ -25,12 +25,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [authLoadingInternal, setAuthLoadingInternal] = useState(true);
-  const [profileLoadingInternal, setProfileLoadingInternal] = useState(false); 
+  const [profileLoadingInternal, setProfileLoadingInternal] = useState(true); // Default to true, as profile fetch is expected
   const [isProfileComplete, setIsProfileComplete] = useState(false);
 
   const fetchAppUser = useCallback(async (user: FirebaseUser | null) => {
     console.log("[AuthContext] fetchAppUser: Called with user:", user ? user.uid : "null");
     if (user) {
+      console.log("[AuthContext] fetchAppUser: Setting profileLoadingInternal to true for UID:", user.uid);
       setProfileLoadingInternal(true);
       try {
         const userDoc = await getUserDocument(user.uid);
@@ -42,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             userDoc.activePeriod &&
             userDoc.availablePeriods &&
             userDoc.availablePeriods.length > 0 &&
-            userDoc.uprId // uprId harus ada dan sama dengan displayName untuk admin/auditor, atau assignedUprId untuk userSatker
+            userDoc.uprId 
           );
 
           if (userDoc.role === 'userSatker') {
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           
           setIsProfileComplete(profileIsConsideredComplete);
-          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Role:", userDoc.role, "AssignedUPR:", userDoc.assignedUprId, "UPR ID:", userDoc.uprId);
+          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Role:", userDoc.role, "AssignedUPR:", userDoc.assignedUprId);
         } else {
           setAppUser(null); 
           setIsProfileComplete(false);
@@ -66,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfileLoadingInternal(false);
       }
     } else {
-      console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states.");
+      console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states. Setting profileLoadingInternal to false.");
       setAppUser(null);
       setIsProfileComplete(false);
       setProfileLoadingInternal(false); 
@@ -75,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("[AuthContext] onAuthStateChanged listener attaching.");
+    console.log("[AuthContext] Initial: authLoadingInternal:", authLoadingInternal, "profileLoadingInternal:", profileLoadingInternal);
     setAuthLoadingInternal(true); 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log("[AuthContext] onAuthStateChanged: Firebase user state is:", user ? user.uid : "null");
@@ -84,9 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await fetchAppUser(user);
       } catch (error) {
         console.error("[AuthContext] onAuthStateChanged: Error from fetchAppUser (should be handled within fetchAppUser):", error);
-        // fetchAppUser handles its own state updates for appUser, isProfileComplete, profileLoadingInternal
       } finally {
-        // This signifies that the onAuthStateChanged callback has finished processing the Firebase user state.
         console.log("[AuthContext] onAuthStateChanged callback finished. Setting authLoadingInternal to false.");
         setAuthLoadingInternal(false);
       }
@@ -103,15 +103,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log(`[AuthContext] refreshAppUser called for UID: ${currentUser.uid}. Triggering fetchAppUser.`);
       await fetchAppUser(currentUser); 
     } else {
-      console.log("[AuthContext] refreshAppUser: No current user, fetchAppUser(null) will be handled implicitly if auth state changes.");
-      // If currentUser is null, onAuthStateChanged would have already triggered fetchAppUser(null).
-      // Or, if it's a manual call without auth state change, ensure appUser states are reset.
+      console.log("[AuthContext] refreshAppUser: No current user. Calling fetchAppUser(null).");
       await fetchAppUser(null);
     }
   }, [currentUser, fetchAppUser]);
   
   return (
-    <AuthContext.Provider value={{ currentUser, appUser, authContextLoading: authLoadingInternal, profileLoading: profileLoadingInternal, isProfileComplete, refreshAppUser }}>
+    <AuthContext.Provider value={{ 
+        currentUser, 
+        appUser, 
+        authContextLoading: authLoadingInternal, 
+        profileLoading: profileLoadingInternal, 
+        isProfileComplete, 
+        refreshAppUser 
+    }}>
       {children}
     </AuthContext.Provider>
   );
