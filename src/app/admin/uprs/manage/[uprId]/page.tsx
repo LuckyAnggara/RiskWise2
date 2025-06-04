@@ -1,22 +1,26 @@
 
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Save, ArrowLeft } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Loader2, Save, ArrowLeft, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { addUpr, getUprById, updateUpr } from '@/services/uprService';
-import type { UPR } from '@/lib/types';
+import type { UPR, AppUser } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { getAllAppUsers, updateUserProfileData } from '@/services/userService';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 const uprFormSchema = z.object({
   name: z.string().min(3, "Nama UPR minimal 3 karakter."),
@@ -36,6 +40,11 @@ export default function ManageSingleUprPage() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
 
+  const [allUsers, setAllUsers] = useState<AppUser[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [initialUserAssignmentsLoaded, setInitialUserAssignmentsLoaded] = useState(false);
+
+
   const {
     register,
     handleSubmit,
@@ -46,41 +55,72 @@ export default function ManageSingleUprPage() {
     defaultValues: { name: "", code: "", description: "" },
   });
 
-  useEffect(() => {
-    if (!isCreatingNew && isAdmin) {
-      setIsLoadingPage(true);
-      getUprById(uprIdParam)
-        .then(uprData => {
-          if (uprData) {
-            reset({
-              name: uprData.name,
-              code: uprData.code,
-              description: uprData.description || "",
-            });
-          } else {
-            toast({ title: "Error", description: "UPR tidak ditemukan.", variant: "destructive" });
-            router.push('/admin/uprs');
-          }
-        })
-        .catch(error => {
-          toast({ title: "Error Memuat UPR", description: error.message, variant: "destructive" });
+  const fetchUsersAndUpr = useCallback(async () => {
+    if (!isAdmin) return;
+    setIsLoadingPage(true);
+    try {
+      const users = await getAllAppUsers();
+      setAllUsers(users.sort((a,b) => (a.displayName || a.email || '').localeCompare(b.displayName || b.email || '')));
+
+      if (!isCreatingNew) {
+        const uprData = await getUprById(uprIdParam);
+        if (uprData) {
+          reset({
+            name: uprData.name,
+            code: uprData.code,
+            description: uprData.description || "",
+          });
+          // Pre-select users assigned to this UPR
+          const assignedUsers = new Set<string>();
+          users.forEach(user => {
+            if (user.uprId === uprIdParam) {
+              assignedUsers.add(user.uid);
+            }
+          });
+          setSelectedUserIds(assignedUsers);
+          setInitialUserAssignmentsLoaded(true);
+        } else {
+          toast({ title: "Error", description: "UPR tidak ditemukan.", variant: "destructive" });
           router.push('/admin/uprs');
-        })
-        .finally(() => setIsLoadingPage(false));
-    } else if (isCreatingNew) {
+        }
+      } else {
+         setInitialUserAssignmentsLoaded(true); // For new UPR, no users are pre-assigned
+      }
+    } catch (error: any) {
+      toast({ title: "Error Memuat Data", description: error.message, variant: "destructive" });
+      if (!isCreatingNew) router.push('/admin/uprs');
+    } finally {
       setIsLoadingPage(false);
     }
   }, [uprIdParam, isCreatingNew, isAdmin, reset, router, toast]);
 
+  useEffect(() => {
+    fetchUsersAndUpr();
+  }, [fetchUsersAndUpr]);
+
+
+  const handleUserSelectionChange = (userId: string) => {
+    setSelectedUserIds(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(userId)) {
+        newSelection.delete(userId);
+      } else {
+        newSelection.add(userId);
+      }
+      return newSelection;
+    });
+  };
 
   const onSubmit: SubmitHandler<UprFormData> = async (data) => {
+    let currentUprId = uprIdParam;
     try {
       if (isCreatingNew) {
-        await addUpr({
+        const newUpr = await addUpr({
           name: data.name,
           code: data.code,
           description: data.description || null,
         });
+        currentUprId = newUpr.id; // Get ID of the newly created UPR
         toast({ title: "UPR Dibuat", description: `UPR "${data.name}" telah berhasil dibuat.` });
       } else {
         await updateUpr(uprIdParam, {
@@ -90,18 +130,35 @@ export default function ManageSingleUprPage() {
         });
         toast({ title: "UPR Diperbarui", description: `UPR "${data.name}" telah berhasil diperbarui.` });
       }
+
+      // Handle user assignments
+      for (const user of allUsers) {
+        const isSelected = selectedUserIds.has(user.uid);
+        const currentUprAssignment = user.uprId;
+
+        if (isSelected && currentUprAssignment !== currentUprId) {
+          // Assign user to this UPR
+          await updateUserProfileData(user.uid, { uprId: currentUprId });
+          toast({ title: "Pengguna Di-assign", description: `Pengguna ${user.displayName || user.email} di-assign ke UPR ${data.name}.`, duration: 2000 });
+        } else if (!isSelected && currentUprAssignment === currentUprId) {
+          // Unassign user from this UPR (set uprId to null)
+          await updateUserProfileData(user.uid, { uprId: null });
+           toast({ title: "Pengguna Di-unassign", description: `Pengguna ${user.displayName || user.email} di-unassign dari UPR ${data.name}.`, variant: "default", duration: 2000 });
+        }
+      }
+
       router.push('/admin/uprs');
-      router.refresh(); 
+      router.refresh();
     } catch (error: any) {
-      toast({ title: "Gagal Menyimpan UPR", description: error.message, variant: "destructive" });
+      toast({ title: "Gagal Menyimpan UPR atau Assignment", description: error.message, variant: "destructive" });
     }
   };
   
-  if (!isAdmin && !isLoadingPage) { // Added !isLoadingPage to prevent premature redirect
+  if (!isAdmin && !isLoadingPage) {
     return <p className="text-destructive">Akses ditolak. Hanya admin yang dapat mengakses halaman ini.</p>;
   }
   
-  if (isLoadingPage) {
+  if (isLoadingPage || (!initialUserAssignmentsLoaded && !isCreatingNew)) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -113,19 +170,19 @@ export default function ManageSingleUprPage() {
     <div className="space-y-6">
       <PageHeader
         title={isCreatingNew ? "Tambah UPR Baru" : "Edit UPR"}
-        description={isCreatingNew ? "Buat Unit Pemilik Risiko baru." : "Perbarui detail UPR yang sudah ada."}
+        description={isCreatingNew ? "Buat Unit Pemilik Risiko baru." : "Perbarui detail UPR dan kelola pengguna yang terhubung."}
         actions={
             <Button onClick={() => router.push('/admin/uprs')} variant="outline">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Kembali ke Daftar UPR
             </Button>
         }
       />
-      <Card>
-        <CardHeader>
-          <CardTitle>{isCreatingNew ? "Formulir UPR Baru" : "Formulir Edit UPR"}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Detail UPR</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
             <div className="space-y-1.5">
               <Label htmlFor="code">Kode UPR</Label>
               <Input
@@ -160,15 +217,52 @@ export default function ManageSingleUprPage() {
                 disabled={isSubmitting}
               />
             </div>
-            <div className="flex justify-end">
-                <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    {isCreatingNew ? "Simpan UPR Baru" : "Simpan Perubahan"}
-                </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+        
+        {!isCreatingNew && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center"><Users className="mr-2 h-5 w-5 text-primary" /> Pengguna Terhubung</CardTitle>
+            <CardDescription>Pilih pengguna yang akan di-assign ke UPR ini. Pengguna yang sudah terhubung akan otomatis tercentang.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {allUsers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Tidak ada pengguna terdaftar di sistem.</p>
+            ) : (
+                <ScrollArea className="h-[300px] border rounded-md p-4">
+                    <div className="space-y-3">
+                    {allUsers.map(user => (
+                        <div key={user.uid} className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 transition-colors">
+                        <Checkbox
+                            id={`user-${user.uid}`}
+                            checked={selectedUserIds.has(user.uid)}
+                            onCheckedChange={() => handleUserSelectionChange(user.uid)}
+                            disabled={isSubmitting}
+                        />
+                        <Label htmlFor={`user-${user.uid}`} className="flex-1 cursor-pointer text-sm">
+                            <span className="font-medium">{user.displayName || <i className="text-muted-foreground">Tanpa Nama</i>}</span>
+                            <span className="text-xs text-muted-foreground ml-2">({user.email})</span>
+                            {user.uprId && user.uprId !== uprIdParam && (
+                                <span className="text-xs text-amber-600 dark:text-amber-400 ml-2 italic">(Saat ini terhubung ke UPR lain)</span>
+                            )}
+                        </Label>
+                        </div>
+                    ))}
+                    </div>
+                </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+        )}
+
+        <div className="flex justify-end">
+            <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                {isCreatingNew ? "Simpan UPR Baru" : "Simpan Perubahan UPR & Pengguna"}
+            </Button>
+        </div>
+      </form>
     </div>
   );
 }
