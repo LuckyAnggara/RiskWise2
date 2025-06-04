@@ -53,12 +53,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const triggerGlobalDataFetch = store.triggerGlobalDataFetch;
 
   const isAuditor = appUser?.role === 'auditor';
+  const isAdminUser = appUser?.role === 'admin';
 
   const activeUprDisplay = useMemo(() => appUser?.displayName || DEFAULT_FALLBACK_UPR_ID, [appUser]);
   const activePeriodDisplay = useMemo(() => appUser?.activePeriod || DEFAULT_PERIOD, [appUser]);
 
   const publicPaths = ['/login', '/register'];
   const settingsPath = '/settings';
+  const auditorSettingsPath = '/auditor/settings';
+  const auditorDashboardPath = '/auditor';
 
   useEffect(() => {
     console.log("[AppLayout] useEffect triggered. States:", { 
@@ -68,6 +71,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       appUser: appUser ? { uid: appUser.uid, displayName: appUser.displayName, uprId: appUser.uprId, activePeriod: appUser.activePeriod, role: appUser.role } : null, 
       isProfileComplete,
       isUprAssigned,
+      isAuditor,
+      isAdminUser,
       pathname 
     });
 
@@ -88,58 +93,82 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // User is logged in
     if (profileLoading) {
       console.log("[AppLayout] User exists, but AppUser profile is loading. No redirect action (main loader should handle).");
       return;
     }
     
     if (publicPaths.includes(pathname)) {
-      console.log(`[AppLayout] On public path (${pathname}), but user logged in. Redirecting to / (AppLayout will then check profile).`);
-      router.replace('/');
+      console.log(`[AppLayout] On public path (${pathname}), but user logged in. Redirecting based on role.`);
+      if (isAuditor) {
+        router.replace(auditorDashboardPath);
+      } else {
+        router.replace('/'); // For admin and userSatker
+      }
       return;
     }
     
-    if (!isProfileComplete && pathname !== settingsPath) {
-      console.log(`[AppLayout] User profile basics are not complete. Current path: ${pathname}. Redirecting to ${settingsPath}.`);
-      router.replace(settingsPath);
+    // Profile setup and role-based redirects
+    if (!isProfileComplete) {
+      // For auditors, if their basic profile (displayName) is not set, they might also need a setup.
+      // However, the main "isProfileComplete" for userSatker often means UPR assignment.
+      // Auditors might have a simpler profile setup.
+      const targetSetupPath = isAuditor ? auditorSettingsPath : settingsPath; // Or a dedicated auditor setup page
+      if (pathname !== targetSetupPath && pathname !== '/profile-setup') { // Allow profile-setup for initial creation
+        console.log(`[AppLayout] User profile basics are not complete. Current path: ${pathname}. Redirecting to ${targetSetupPath}.`);
+        router.replace(targetSetupPath);
+      }
       return;
     }
 
-    // Data fetching logic based on UPR assignment and role
+    // If auditor is on main dashboard, redirect to auditor dashboard
+    if (isAuditor && pathname === "/") {
+        console.log("[AppLayout] Auditor on root path, redirecting to auditor dashboard.");
+        router.replace(auditorDashboardPath);
+        return;
+    }
+    
+    // Data fetching logic
     if (isProfileComplete && appUser?.activePeriod && currentUser.uid) {
         let uprIdForDataFetch: string | null = null;
         
         if (isAuditor) {
-            // For auditors, data fetching is typically handled on the specific review page
-            // based on localStorage. We might not need to trigger a global fetch here unless
-            // they also have a default UPR they operate on as userSatker.
-            // For now, assume auditor data fetch is more page-specific.
-            // If they were previously on a userSatker UPR and switched to auditor role, reset store.
-             if (storeDataFetchedForUprPeriod !== null && !pathname.startsWith('/reviu')) { // Heuristic to reset if not in reviu section
-                console.log("[AppLayout] Auditor role active, not in reviu section, resetting store if it had data.");
+            // Auditor data fetching is page-specific (e.g., on /reviu/data-risiko).
+            // No global data fetch for auditor's "own" UPR from AppLayout.
+            // Reset store if auditor is outside their specific sections and store had data.
+            if (storeDataFetchedForUprPeriod !== null && !pathname.startsWith('/reviu') && !pathname.startsWith('/auditor')) {
+                console.log("[AppLayout] Auditor role active, outside reviu/auditor sections, resetting store if it had data.");
                 resetStoreData();
             }
-        } else if (isUprAssigned && appUser.uprId) {
+        } else if (isUprAssigned && appUser.uprId) { // userSatker or Admin with assigned UPR
             uprIdForDataFetch = appUser.uprId;
+        } else if (isAdminUser && !appUser.uprId) { // Admin without a specific UPR (might be superadmin)
+            // Admin might not need a default UPR context for some views (e.g., user management).
+            // For data-related views, they might select a UPR or this logic needs refinement.
+            // For now, don't trigger global fetch if admin has no UPR, let pages handle it.
+            console.log("[AppLayout] Admin user without assigned UPR. Skipping global data fetch from AppLayout.");
+            if (storeDataFetchedForUprPeriod !== null) resetStoreData(); // Reset if there was data from another context
         }
 
-        if (uprIdForDataFetch) {
+
+        if (uprIdForDataFetch) { // Only for userSatker with assigned UPR or Admin with assigned UPR
             const currentContextIdentifier = `${uprIdForDataFetch}|${appUser.activePeriod}`;
             if (storeDataFetchedForUprPeriod !== currentContextIdentifier) {
-                console.log(`[AppLayout] Context changed or data not fetched for UPR User. Old: ${storeDataFetchedForUprPeriod}, New: ${currentContextIdentifier}. Triggering global data fetch for UPR ID: ${uprIdForDataFetch}.`);
+                console.log(`[AppLayout] Context changed or data not fetched for User. Old: ${storeDataFetchedForUprPeriod}, New: ${currentContextIdentifier}. Triggering global data fetch for UPR ID: ${uprIdForDataFetch}.`);
                 triggerGlobalDataFetch(uprIdForDataFetch, appUser.activePeriod, currentUser.uid);
             } else {
                 console.log(`[AppLayout] Data already fetched for context: ${currentContextIdentifier}.`);
             }
-        } else if (!isAuditor && isProfileComplete && !isUprAssigned) {
-            console.log(`[AppLayout] Profile basics complete, but UPR not assigned (and not auditor). Store will be reset.`);
+        } else if (!isAuditor && isProfileComplete && !isUprAssigned && !isAdminUser) { // UserSatker role specifically
+            console.log(`[AppLayout] userSatker profile basics complete, but UPR not assigned. Store will be reset.`);
             if (storeDataFetchedForUprPeriod !== null) {
-               console.log("[AppLayout] UPR not assigned, resetting store data.");
+               console.log("[AppLayout] userSatker UPR not assigned, resetting store data.");
                resetStoreData();
             }
         }
-    } else if (!isProfileComplete && pathname === settingsPath) {
-      console.log("[AppLayout] On settings path, profile basics incomplete. Allowing SettingsPage to render for setup.");
+    } else if (!isProfileComplete && (pathname === settingsPath || pathname === auditorSettingsPath || pathname === '/profile-setup')) {
+      console.log("[AppLayout] On settings/profile-setup path, profile basics incomplete. Allowing page to render for setup.");
     } else {
       console.warn("[AppLayout] Unhandled state for data fetching or profile context. Current states:", {isProfileComplete, isUprAssigned, appUser});
        if (storeDataFetchedForUprPeriod !== null) resetStoreData();
@@ -147,8 +176,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   }, [
     currentUser, appUser, authContextLoading, profileLoading, 
-    isProfileComplete, isUprAssigned, router, pathname, isAuditor,
-    resetStoreData, storeDataFetchedForUprPeriod, triggerGlobalDataFetch
+    isProfileComplete, isUprAssigned, router, pathname, isAuditor, isAdminUser,
+    resetStoreData, storeDataFetchedForUprPeriod, triggerGlobalDataFetch,
+    auditorDashboardPath, auditorSettingsPath, settingsPath // Add new paths
   ]);
 
   const handleLogout = async () => {
@@ -156,7 +186,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       await signOut(auth);
       resetStoreData(); 
       toast({ title: "Keluar Berhasil", description: "Anda telah berhasil keluar." });
-      router.push('/login'); 
+      // No need to explicitly push to /login, useEffect above will handle it.
     } catch (error) {
       console.error("Error signing out: ", error);
       toast({ title: "Gagal Keluar", description: "Terjadi kesalahan saat mencoba keluar.", variant: "destructive" });
@@ -173,11 +203,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // If user is not logged in AND on a public path, render children directly (e.g., login page)
   if (!currentUser && publicPaths.includes(pathname)) {
     return <>{children}<Toaster /></>;
   }
   
-  if (currentUser && profileLoading && pathname !== settingsPath) {
+  // If user is logged in, but profile is still loading AND they are not on a setup/settings path, show loader.
+  // If they are on settings/profile-setup, let those pages handle their own loading state.
+  if (currentUser && profileLoading && ![settingsPath, auditorSettingsPath, '/profile-setup'].includes(pathname)) {
      return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -186,13 +219,28 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+  
+  // If user is logged in and profile is NOT complete, AND they are NOT on their designated settings/setup page,
+  // this indicates useEffect should have redirected them. If somehow they are here, show loader until redirect.
+  if (currentUser && !profileLoading && !isProfileComplete && 
+      pathname !== (isAuditor ? auditorSettingsPath : settingsPath) &&
+      pathname !== '/profile-setup') {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+        <p className="text-xl text-muted-foreground">Mengarahkan ke pengaturan profil...</p>
+        <Toaster />
+      </div>
+    );
+  }
 
+  // If user is logged in (and profile loaded or on setup page), render the main layout
   if (currentUser) {
     return (
       <SidebarProvider defaultOpen>
         <Sidebar variant="sidebar" collapsible="icon" side="left">
           <SidebarHeader className="p-4">
-            <NextLink href="/" className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
+            <NextLink href={isAuditor ? auditorDashboardPath : "/"} className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
               <AppLogo className="h-8 w-8 text-primary" />
               <span className="font-semibold text-lg text-primary group-data-[collapsible=icon]:hidden">
                 RiskWise
@@ -218,6 +266,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="text-sm text-muted-foreground">
                   {isAuditor ? (
                      <span className="font-semibold">Peran: Auditor Internal</span>
+                  ) : isAdminUser && !isUprAssigned ? (
+                     <span className="font-semibold">Peran: Administrator Sistem</span>
                   ) : (
                     <>
                       <span className="font-semibold">UPR:</span> {activeUprDisplay} | <span className="font-semibold">Periode:</span> {activePeriodDisplay}
@@ -260,7 +310,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <DropdownMenuLabel>{appUser?.displayName || currentUser.displayName || currentUser.email}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <NextLink href="/settings">
+                    <NextLink href={isAuditor ? auditorSettingsPath : settingsPath}>
                       <SettingsIcon className="mr-2 h-4 w-4" />
                       <span>Pengaturan</span>
                     </NextLink>
@@ -275,7 +325,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
           <main className="flex-1 p-4 md:p-6">
-            {currentUser && appUser && isProfileComplete && !isUprAssigned && !isAuditor && pathname !== settingsPath && ( 
+            {currentUser && appUser && isProfileComplete && !isUprAssigned && !isAuditor && !isAdminUser && pathname !== settingsPath && ( 
               <Alert variant="default" className="mb-4 bg-amber-50 border-amber-300 dark:bg-amber-900/30 dark:border-amber-700">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 <AlertTitle className="text-amber-700 dark:text-amber-300">UPR Belum Di-assign</AlertTitle>
@@ -297,7 +347,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  console.log("[AppLayout] Fallback Loader (final). Pathname:", pathname, "currentUser:", !!currentUser, "isProfileComplete:", isProfileComplete, "isUprAssigned:", isUprAssigned);
+  // Fallback for unhandled states (e.g., user exists but no appUser and profile is supposedly complete - indicates inconsistency)
+  // This should ideally not be reached if logic above is correct.
+  console.warn("[AppLayout] Reached fallback loader state. This might indicate an issue. Pathname:", pathname, "currentUser:", !!currentUser, "appUser:", !!appUser, "isProfileComplete:", isProfileComplete, "isUprAssigned:", isUprAssigned);
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />

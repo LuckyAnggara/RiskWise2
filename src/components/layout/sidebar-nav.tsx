@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, ShieldCheck, FileText, Activity, Columns, FileArchive, Users, Briefcase, Shield, SearchCheck } from "lucide-react"; 
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, ShieldCheck, FileText, Activity, Columns, FileArchive, Users, Briefcase, Shield, SearchCheck, UserCog } from "lucide-react"; 
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -21,42 +21,45 @@ interface NavItem {
   icon: React.ElementType;
   alwaysEnabled?: boolean; 
   adminOnly?: boolean;
-  isAuditorFeature?: boolean; 
+  // isAuditorFeature?: boolean; // No longer needed with separate nav definitions
 }
 
+const userSatkerNavDefinition: NavItem[] = [
+  { label: "Dasbor", href: "/", icon: LayoutDashboard },
+  { label: "Sasaran", href: "/goals", icon: Target },
+  { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText }, 
+  { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3 }, 
+  { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck },
+  { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
+  { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
+  { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
+  { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
+];
+
+const auditorNavDefinition: NavItem[] = [
+    { label: "Dasbor Auditor", href: "/auditor", icon: LayoutDashboard },
+    { label: "Reviu & Evaluasi Risiko", href: "/reviu/pilih-konteks", icon: SearchCheck },
+    { label: "Pengaturan Auditor", href: "/auditor/settings", icon: UserCog }, // Using UserCog for Auditor Settings
+];
+
+const adminNavDefinition: NavItem[] = [
+  { label: "Admin Dashboard", href: "/admin", icon: Shield, adminOnly: true },
+  { label: "Manajemen UPR", href: "/admin/uprs", icon: Briefcase, adminOnly: true },
+  { label: "Manajemen Pengguna", href: "/admin/users", icon: Users, adminOnly: true },
+];
+  
 export function SidebarNav() {
   const pathname = usePathname(); 
   const { openMobile, setOpenMobile } = useSidebar();
   const { isUprAssigned, isAdmin, appUser } = useAuth();
   const isAuditor = appUser?.role === 'auditor';
 
-  const mainNavDefinition: NavItem[] = [
-    { label: "Dasbor", href: "/", icon: LayoutDashboard },
-    { label: "Sasaran", href: "/goals", icon: Target },
-    { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText }, 
-    { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3 }, 
-    { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck },
-    { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
-    { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
-    { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
-    { label: "Reviu & Evaluasi Risiko", href: "/reviu/pilih-konteks", icon: SearchCheck, isAuditorFeature: true},
-    { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
-  ];
-
-  const adminNavDefinition: NavItem[] = [
-    { label: "Admin Dashboard", href: "/admin", icon: Shield, adminOnly: true },
-    { label: "Manajemen UPR", href: "/admin/uprs", icon: Briefcase, adminOnly: true },
-    { label: "Manajemen Pengguna", href: "/admin/users", icon: Users, adminOnly: true },
-  ];
-  
   const isActive = (navHref: string) => {
-    if (navHref === "/") {
-      return pathname === "/";
-    }
-    if (["/risk-document", "/comparative-monitoring", "/admin", "/reviu"].some(p => navHref.startsWith(p))) {
-        return pathname.startsWith(navHref);
-    }
-    if (navHref === "/all-risks") { 
+    if (navHref === "/") return pathname === "/";
+    if (navHref === "/auditor") return pathname === "/auditor" || pathname.startsWith("/auditor/");
+    if (navHref === "/reviu/pilih-konteks") return pathname.startsWith("/reviu"); // Matches /reviu and its sub-paths
+    if (navHref === "/admin") return pathname.startsWith("/admin");
+     if (navHref === "/all-risks") { 
         return pathname === navHref || pathname.startsWith(navHref + "/manage");
     }
     return pathname.startsWith(navHref);
@@ -65,20 +68,13 @@ export function SidebarNav() {
   const renderNavItem = (item: NavItem, index: number) => {
     let isDisabled = false;
     let tooltipText = item.label;
-
-    // This function assumes the list of items passed to it is already filtered for the current user type (auditor, admin, userSatker)
     
-    if (isAuditor) {
-        // For an auditor, their specific menu items (Reviu & Settings) are never disabled by UPR assignment.
-        isDisabled = false; 
-    } else { // For non-auditors (admin or userSatker)
-        // Admin items are never disabled by UPR status.
-        // `alwaysEnabled` items (like Settings) are never disabled.
-        // Other items are disabled if UPR is not assigned.
-        if (!item.adminOnly && !item.alwaysEnabled && !isUprAssigned) {
-            isDisabled = true;
-            tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
-        }
+    // Auditors have all their defined menu items enabled.
+    // Admins have all their defined menu items enabled.
+    // userSatker items (except 'alwaysEnabled') are disabled if UPR is not assigned.
+    if (!isAuditor && !item.adminOnly && !item.alwaysEnabled && !isUprAssigned) {
+        isDisabled = true;
+        tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
     }
 
     return (
@@ -104,33 +100,30 @@ export function SidebarNav() {
     );
   };
 
+  if (isAuditor) {
+    return (
+      <SidebarMenu>
+        <SidebarGroup>
+          <SidebarGroupLabel>Menu Auditor</SidebarGroupLabel>
+          {auditorNavDefinition.map((item, index) => renderNavItem(item, index))}
+        </SidebarGroup>
+      </SidebarMenu>
+    );
+  }
+
+  // For Admin or UserSatker
   return (
     <SidebarMenu>
-      {isAuditor ? (
-        // AUDITOR VIEW
+      <SidebarGroup>
+        <SidebarGroupLabel>Menu Utama</SidebarGroupLabel>
+        {userSatkerNavDefinition.map((item, index) => renderNavItem(item, index))}
+      </SidebarGroup>
+      
+      {isAdmin && (
         <SidebarGroup>
-          <SidebarGroupLabel>Menu Reviu</SidebarGroupLabel>
-          {mainNavDefinition
-            .filter(item => item.isAuditorFeature || item.alwaysEnabled) // Auditor only sees "Reviu & Evaluasi" and "Pengaturan"
-            .map((item, index) => renderNavItem(item, index))}
+          <SidebarGroupLabel>Menu Admin</SidebarGroupLabel>
+          {adminNavDefinition.map((item, index) => renderNavItem(item, index + 100))}
         </SidebarGroup>
-      ) : (
-        // NON-AUDITOR VIEW (Admin or UserSatker)
-        <>
-          <SidebarGroup>
-            <SidebarGroupLabel>Menu Utama</SidebarGroupLabel>
-            {mainNavDefinition
-              .filter(item => !item.isAuditorFeature && !item.adminOnly) // Exclude auditor-specific and admin-only items
-              .map((item, index) => renderNavItem(item, index))}
-          </SidebarGroup>
-          
-          {isAdmin && ( // Admin menus are only shown if user isAdmin AND not an auditor (auditor view is restrictive)
-            <SidebarGroup>
-              <SidebarGroupLabel>Menu Admin</SidebarGroupLabel>
-              {adminNavDefinition.map((item, index) => renderNavItem(item, index + 100))} {/* Offset index for unique keys */}
-            </SidebarGroup>
-          )}
-        </>
       )}
     </SidebarMenu>
   );
