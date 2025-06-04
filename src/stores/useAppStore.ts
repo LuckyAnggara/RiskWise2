@@ -8,7 +8,7 @@ import {
   getGoals as getGoalsFromService, 
   updateGoal as updateGoalInService, 
   deleteGoal as deleteGoalFromService,
-  getGoalById as getGoalByIdFromService, // Added
+  getGoalById as getGoalByIdFromService, 
 } from '@/services/goalService';
 import {
   addPotentialRisk as addPotentialRiskToService,
@@ -42,62 +42,67 @@ import {
   upsertRiskExposure as upsertRiskExposureToService,
   getRiskExposuresBySession as getRiskExposuresBySessionFromService,
 } from '@/services/riskExposureService';
-// import { upsertMonitoredControlMeasure, getMonitoredControlMeasuresForSessionAndCause } from '@/services/monitoredControlMeasureService'; // Placeholder
+import { 
+  upsertMonitoredControlMeasure as upsertMonitoredControlMeasureToService, 
+  getMonitoredControlMeasuresBySession as getMonitoredControlMeasuresBySessionFromService 
+} from '@/services/monitoredControlMeasureService';
+
 
 interface AppState {
   activeUprId: string | null; 
   activePeriod: string | null; 
+  activeUserId: string | null; // To store current Firebase Auth UID
   dataFetchedForUprPeriod: string | null; 
 
   goals: Goal[];
   goalsLoading: boolean;
   fetchGoals: (uprId: string, period: string, actualUserId: string) => Promise<void>;
-  addGoalToStore: (goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'userId' | 'period' | 'uprId'>, uprId: string, period: string, actualUserId: string) => Promise<Goal | null>;
+  addGoalToStore: (goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'userId' | 'period' | 'uprId'>) => Promise<Goal | null>;
   updateGoalInStore: (goalId: string, updatedData: Partial<Omit<Goal, 'id' | 'userId' | 'period' | 'code' | 'createdAt' | 'uprId'>>) => Promise<Goal | null>;
-  deleteGoalFromStore: (goalId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
-  getGoalById: (goalId: string, uprId: string, period: string) => Promise<Goal | null>;
+  deleteGoalFromStore: (goalId: string) => Promise<void>;
+  getGoalById: (goalId: string) => Promise<Goal | null>;
 
   potentialRisks: PotentialRisk[];
   potentialRisksLoading: boolean;
   fetchPotentialRisks: (uprId: string, period: string, actualUserId: string) => Promise<void>;
-  addPotentialRiskToStore: (data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'userId' | 'period' | 'sequenceNumber' | 'goalId' | 'uprId'>, goalId: string, uprId: string, period: string, actualUserId: string, sequenceNumber: number) => Promise<PotentialRisk | null>;
+  addPotentialRiskToStore: (data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'userId' | 'period' | 'sequenceNumber' | 'goalId' | 'uprId'>, goalId: string, sequenceNumber: number) => Promise<PotentialRisk | null>;
   updatePotentialRiskInStore: (potentialRiskId: string, updatedData: Partial<Omit<PotentialRisk, 'id' | 'userId' | 'period' | 'goalId' | 'identifiedAt' | 'sequenceNumber' | 'uprId'>>) => Promise<PotentialRisk | null>;
-  deletePotentialRiskFromStore: (potentialRiskId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
-  getPotentialRiskById: (potentialRiskId: string, uprId: string, period: string) => Promise<PotentialRisk | null>;
+  deletePotentialRiskFromStore: (potentialRiskId: string) => Promise<void>;
+  getPotentialRiskById: (potentialRiskId: string) => Promise<PotentialRisk | null>;
 
   riskCauses: RiskCause[];
   riskCausesLoading: boolean;
   fetchRiskCauses: (uprId: string, period: string, actualUserId: string) => Promise<void>;
-  addRiskCauseToStore: (data: Omit<RiskCause, 'id' | 'createdAt' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'uprId'>, potentialRiskId: string, goalId: string, uprId: string, period: string, actualUserId: string, sequenceNumber: number) => Promise<RiskCause | null>;
+  addRiskCauseToStore: (data: Omit<RiskCause, 'id' | 'createdAt' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'uprId'>, potentialRiskId: string, goalId: string, sequenceNumber: number) => Promise<RiskCause | null>;
   updateRiskCauseInStore: (riskCauseId: string, updatedData: Partial<Omit<RiskCause, 'id' | 'userId' | 'period' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'analysisUpdatedAt' | 'uprId'>>) => Promise<RiskCause | null>;
-  deleteRiskCauseFromStore: (riskCauseId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
-  getRiskCauseById: (riskCauseId: string, uprId: string, period: string) => Promise<RiskCause | null>;
+  deleteRiskCauseFromStore: (riskCauseId: string) => Promise<void>;
+  getRiskCauseById: (riskCauseId: string) => Promise<RiskCause | null>;
 
   controlMeasures: ControlMeasure[];
   controlMeasuresLoading: boolean;
   fetchControlMeasures: (uprId: string, period: string, actualUserId: string, riskCauseId_optional?: string) => Promise<void>;
-  addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType' | 'uprId'>, riskCauseId: string, potentialRiskId: string, goalId: string, uprId: string, period: string, actualUserId: string, controlType: ControlMeasureTypeKey) => Promise<ControlMeasure | null>;
+  addControlMeasureToStore: (data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType' | 'uprId'>, riskCauseId: string, potentialRiskId: string, goalId: string, controlType: ControlMeasureTypeKey) => Promise<ControlMeasure | null>;
   updateControlMeasureInStore: (controlMeasureId: string, updatedData: Partial<Omit<ControlMeasure, 'id' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'createdAt' | 'sequenceNumber' | 'updatedAt' | 'uprId'>>) => Promise<ControlMeasure | null>;
-  deleteControlMeasureFromStore: (controlMeasureId: string, uprId: string, period: string) => Promise<void>;
-  getControlMeasureById: (controlMeasureId: string, uprId: string, period: string) => Promise<ControlMeasure | null>;
+  deleteControlMeasureFromStore: (controlMeasureId: string) => Promise<void>;
+  getControlMeasureById: (controlMeasureId: string) => Promise<ControlMeasure | null>;
   
   monitoringSessions: MonitoringSession[];
   monitoringSessionsLoading: boolean;
   fetchMonitoringSessions: (uprId: string, period: string, actualUserId: string) => Promise<void>;
-  addMonitoringSessionToState: (sessionData: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'status' | 'uprId'>, uprId: string, period: string, actualUserId: string) => Promise<MonitoringSession | null>;
-  updateMonitoringSessionStatusInState: (sessionId: string, status: MonitoringSessionStatus, uprId: string, period: string, actualUserId: string) => Promise<MonitoringSession | null>;
-  deleteMonitoringSessionFromState: (sessionId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
+  addMonitoringSessionToState: (sessionData: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'status' | 'uprId'>) => Promise<MonitoringSession | null>;
+  updateMonitoringSessionStatusInState: (sessionId: string, status: MonitoringSessionStatus) => Promise<MonitoringSession | null>;
+  deleteMonitoringSessionFromState: (sessionId: string) => Promise<void>;
   getMonitoringSessionByIdFromState: (sessionId: string) => MonitoringSession | null;
 
   riskExposures: RiskExposure[];
   riskExposuresLoading: boolean;
-  fetchRiskExposuresForSession: (sessionId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
-  upsertRiskExposureInState: (exposureData: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period' | 'uprId'>, uprId: string, period: string, actualUserId: string) => Promise<RiskExposure | null>;
+  fetchRiskExposuresForSession: (sessionId: string) => Promise<void>;
+  upsertRiskExposureInState: (exposureData: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period' | 'uprId'>) => Promise<RiskExposure | null>;
 
   monitoredControlMeasuresData: MonitoredControlMeasureData[];
   monitoredControlMeasuresLoading: boolean;
-  fetchMonitoredControlMeasuresForSession: (sessionId: string, uprId: string, period: string, actualUserId: string) => Promise<void>;
-  upsertMonitoredControlMeasureInState: (mcmData: Omit<MonitoredControlMeasureData, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'| 'uprId'>, uprId: string, period: string, actualUserId: string) => Promise<MonitoredControlMeasureData | null>;
+  fetchMonitoredControlMeasuresForSession: (sessionId: string) => Promise<void>;
+  upsertMonitoredControlMeasureInState: (mcmData: Omit<MonitoredControlMeasureData, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'| 'uprId'>) => Promise<MonitoredControlMeasureData | null>;
 
   setAppContext: (uprId: string, period: string, actualUserId: string) => void; 
   triggerGlobalDataFetch: (uprId: string, period: string, actualUserId: string) => Promise<void>;
@@ -107,6 +112,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   activeUprId: null,
   activePeriod: null,
+  activeUserId: null, // Initialize activeUserId
   dataFetchedForUprPeriod: null,
 
   goals: [],
@@ -126,14 +132,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setAppContext: (uprId, period, actualUserId) => {
     console.log(`[AppStore] setAppContext: Setting uprId=${uprId}, period=${period}, actualUserId=${actualUserId}`);
-    const oldContextIdentifier = get().dataFetchedForUprPeriod; // Check against dataFetchedForUprPeriod
+    const oldContextIdentifier = get().dataFetchedForUprPeriod;
     const newContextIdentifier = `${uprId}|${period}`;
     
-    set({ activeUprId: uprId, activePeriod: period });
+    set({ activeUprId: uprId, activePeriod: period, activeUserId: actualUserId }); // Store actualUserId
 
     if (oldContextIdentifier !== newContextIdentifier) {
       console.log(`[AppStore] setAppContext: Context changed OR data not fetched for ${newContextIdentifier}. Triggering global data fetch.`);
-      get().resetAllData(); // Reset data before fetching for new context
+      get().resetAllData(); 
       get().triggerGlobalDataFetch(uprId, period, actualUserId);
     } else {
       console.log(`[AppStore] setAppContext: Context same and data already fetched for ${newContextIdentifier}. Not re-fetching.`);
@@ -148,27 +154,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     
     const uniqueUprPeriodIdentifier = `${uprIdToFetchFor}|${periodToFetchFor}`;
+    console.log(`[AppStore] Triggering global data fetch for ${uniqueUprPeriodIdentifier} by user ${actualUserIdToUse}. Stored activeUprId: ${get().activeUprId}, activePeriod: ${get().activePeriod}, activeUserId: ${get().activeUserId}`);
     
-    console.log(`[AppStore] Triggering global data fetch for ${uniqueUprPeriodIdentifier} by user ${actualUserIdToUse}`);
     set({ 
       activeUprId: uprIdToFetchFor, 
       activePeriod: periodToFetchFor,
+      activeUserId: actualUserIdToUse, // Ensure activeUserId is also set/updated here
       dataFetchedForUprPeriod: uniqueUprPeriodIdentifier, 
       goalsLoading: true, 
       potentialRisksLoading: true, 
       riskCausesLoading: true, 
       controlMeasuresLoading: true,
       monitoringSessionsLoading: true, 
-      // riskExposures and monitoredControlMeasuresData are fetched per session, so not set to true here
     });
     try {
-      // Fetching sequence: Goals -> PRs -> RCs -> CMs. Monitoring sessions can be fetched in parallel or after goals.
       await get().fetchGoals(uprIdToFetchFor, periodToFetchFor, actualUserIdToUse);
-      // Dependent fetches (PRs, RCs, CMs, Monitoring Sessions) are now triggered within their respective parent fetch success.
       console.log(`[AppStore] Global data fetch sequence initiated for ${uniqueUprPeriodIdentifier}. Dependent fetches will follow.`);
     } catch (error) {
       console.error("[AppStore] Error during triggerGlobalDataFetch main sequence:", error);
-      // If the initial fetch (goals) fails, reset loading states and dataFetched marker
       set({ 
         dataFetchedForUprPeriod: null, 
         goalsLoading: false, 
@@ -183,8 +186,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   resetAllData: () => {
-    console.log("[AppStore] Resetting all data and loading states.");
-    set({
+    console.log("[AppStore] Resetting all data and loading states, but preserving active context if available.");
+    set(state => ({ // Pass a function to set to access current state
       goals: [],
       goalsLoading: false,
       potentialRisks: [],
@@ -199,14 +202,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       riskExposuresLoading: false,
       monitoredControlMeasuresData: [],
       monitoredControlMeasuresLoading: false,
-      activeUprId: null, // Keep activeUprId and activePeriod if set by AuthContext
-      activePeriod: null, // Or decide if these should also be reset
-      dataFetchedForUprPeriod: null,
-    });
+      // activeUprId, activePeriod, activeUserId are NOT reset here
+      // They are managed by setAppContext or triggerGlobalDataFetch
+      dataFetchedForUprPeriod: null, // Reset this marker
+    }));
   },
 
+  // --- Goals ---
   fetchGoals: async (uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching goals for UPR: ${uprId}, Period: ${period}`);
+    const state = get();
+    if (state.activeUprId !== uprId || state.activePeriod !== period) {
+      console.warn(`[AppStore] fetchGoals: Context mismatch. Store: ${state.activeUprId}|${state.activePeriod}, Requested: ${uprId}|${period}. Aborting fetch.`);
+      set({ goalsLoading: false }); // Ensure loading is stopped
+      return;
+    }
+    console.log(`[AppStore] Fetching goals for UPR: ${uprId}, Period: ${period}. Current activeUserId: ${state.activeUserId}`);
     set({ goalsLoading: true });
     try {
       const result = await getGoalsFromService(uprId, period);
@@ -214,14 +224,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         const sortedGoals = result.goals.sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }));
         set({ goals: sortedGoals, goalsLoading: false });
         console.log(`[AppStore] Goals fetched for UPR ${uprId}: ${sortedGoals.length}. Triggering PR & Monitoring Session fetch.`);
-        await get().fetchPotentialRisks(uprId, period, actualUserId);
+        await get().fetchPotentialRisks(uprId, period, actualUserId); // actualUserId (creator) is needed for PR service
         await get().fetchMonitoringSessions(uprId, period, actualUserId); 
       } else {
         console.warn(`[AppStore] fetchGoals: Failed to fetch or no goals for UPR ${uprId}. Message: ${result.message}`);
         set({ goals: [], goalsLoading: false }); 
-        set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false }); // Cascade loading stop
+        set({ potentialRisksLoading: false, riskCausesLoading: false, controlMeasuresLoading: false, monitoringSessionsLoading: false });
       }
-    } catch (error) { /* ... error handling as before ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in fetchGoals:", errorMessage);
         set({ goals: [], goalsLoading: false, dataFetchedForUprPeriod: null });
@@ -229,99 +239,114 @@ export const useAppStore = create<AppState>((set, get) => ({
         throw new Error(`Gagal memuat daftar sasaran dari store: ${errorMessage}`);
     }
   },
-  addGoalToStore: async (goalData, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Adding goal for UPR: ${uprId}, Period: ${period}`);
+  addGoalToStore: async (goalData) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah sasaran.");
+    console.log(`[AppStore] Adding goal. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}, User ID for record=${activeUserId}`);
     try {
-      const newGoalFromService = await addGoalToService(goalData, uprId, period, actualUserId);
+      const newGoalFromService = await addGoalToService(goalData, activeUprId, activePeriod, activeUserId);
       set(state => ({
         goals: [...state.goals, newGoalFromService].sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }))
       }));
       return newGoalFromService;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in addGoalToStore:", errorMessage);
         throw new Error(`Gagal menambahkan sasaran di store: ${errorMessage}`);
     }
   },
   updateGoalInStore: async (goalId, updatedData) => {
-    console.log(`[AppStore] Updating goal ID: ${goalId}`);
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memperbarui sasaran.");
+     console.log(`[AppStore] Updating goal ID: ${goalId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await updateGoalInService(goalId, updatedData);
-      let goalUprId = "";
-      let goalPeriod = "";
+      await updateGoalInService(goalId, updatedData); // Service handles its own context validation if needed
+      let goalUprIdForRefetch = "";
+      let goalPeriodForRefetch = "";
       set(state => {
         const newGoals = state.goals.map(g => {
           if (g.id === goalId) {
-            goalUprId = g.uprId; // Capture context for refetch
-            goalPeriod = g.period;
-            return { ...g, ...updatedData, updatedAt: new Date().toISOString() };
+            goalUprIdForRefetch = g.uprId;
+            goalPeriodForRefetch = g.period;
+            return { ...g, ...updatedData, userId: activeUserId, updatedAt: new Date().toISOString() }; // Update userId to current editor
           }
           return g;
         }).sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }));
         return { goals: newGoals };
       });
-      if (goalUprId && goalPeriod && get().activeUprId) { // Refetch PRs if context matches
-         await get().fetchPotentialRisks(goalUprId, goalPeriod, get().activeUprId!); // Assume activeUprId is actualUserId for this context
+      if (goalUprIdForRefetch && goalPeriodForRefetch && activeUserId) { 
+         await get().fetchPotentialRisks(goalUprIdForRefetch, goalPeriodForRefetch, activeUserId);
       }
       const updatedGoal = get().goals.find(g => g.id === goalId);
       return updatedGoal || null;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in updateGoalInStore:", errorMessage);
         throw new Error(`Gagal memperbarui sasaran di store: ${errorMessage}`);
     }
   },
-  deleteGoalFromStore: async (goalId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Deleting goal ID: ${goalId} from UPR: ${uprId}`);
+  deleteGoalFromStore: async (goalId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus sasaran.");
+    console.log(`[AppStore] Deleting goal ID: ${goalId} from UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await deleteGoalFromService(goalId, uprId, period); // Pass uprId and period
+      await deleteGoalFromService(goalId, activeUprId, activePeriod);
       set(state => ({
         goals: state.goals.filter(g => g.id !== goalId),
-        potentialRisks: state.potentialRisks.filter(pr => pr.goalId !== goalId && pr.uprId === uprId && pr.period === period),
-        riskCauses: state.riskCauses.filter(rc => rc.goalId !== goalId && rc.uprId === uprId && rc.period === period),
-        controlMeasures: state.controlMeasures.filter(cm => cm.goalId !== goalId && cm.uprId === uprId && cm.period === period),
+        potentialRisks: state.potentialRisks.filter(pr => !(pr.goalId === goalId && pr.uprId === activeUprId && pr.period === activePeriod)),
+        riskCauses: state.riskCauses.filter(rc => !(rc.goalId === goalId && rc.uprId === activeUprId && rc.period === activePeriod)),
+        controlMeasures: state.controlMeasures.filter(cm => !(cm.goalId === goalId && cm.uprId === activeUprId && cm.period === activePeriod)),
       }));
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in deleteGoalFromStore:", errorMessage);
         throw new Error(`Gagal menghapus sasaran dari store: ${errorMessage}`);
     }
   },
-  getGoalById: async (goalId, uprId, period) => {
-    const existingGoal = get().goals.find(g => g.id === goalId && g.uprId === uprId && g.period === period);
+  getGoalById: async (goalId) => {
+    const { activeUprId, activePeriod } = get();
+    if (!activeUprId || !activePeriod) return null;
+    const existingGoal = get().goals.find(g => g.id === goalId && g.uprId === activeUprId && g.period === activePeriod);
     if (existingGoal) return existingGoal;
     try {
-      const goalFromService = await getGoalByIdFromService(goalId, uprId, period); // Pass uprId and period
-      if(goalFromService) set(state => ({ goals: Array.from(new Set([...state.goals, goalFromService]))}));
+      const goalFromService = await getGoalByIdFromService(goalId, activeUprId, activePeriod);
+      if(goalFromService) set(state => ({ goals: Array.from(new Set([...state.goals, goalFromService])).sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' })) }));
       return goalFromService || null;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         console.error(`[AppStore] Error in getGoalById from service for ${goalId}:`, error);
         return null;
     }
   },
 
+  // --- PotentialRisks ---
   fetchPotentialRisks: async (uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching potential risks for UPR: ${uprId}, Period: ${period}`);
+    const state = get();
+     if (state.activeUprId !== uprId || state.activePeriod !== period) {
+      console.warn(`[AppStore] fetchPotentialRisks: Context mismatch. Store: ${state.activeUprId}|${state.activePeriod}, Requested: ${uprId}|${period}. Aborting fetch.`);
+      set({ potentialRisksLoading: false });
+      return;
+    }
+    console.log(`[AppStore] Fetching potential risks for UPR: ${uprId}, Period: ${period}. Current activeUserId: ${state.activeUserId}`);
     set({ potentialRisksLoading: true });
     try {
       const currentGoals = get().goals.filter(g => g.uprId === uprId && g.period === period);
       if (currentGoals.length === 0 && !get().goalsLoading) {
         console.log("[AppStore] No goals for current UPR/Period or goals still loading, skipping PR fetch.");
         set({ potentialRisks: [], potentialRisksLoading: false });
-        await get().fetchRiskCauses(uprId, period, actualUserId); // Proceed to fetch RCs (which will likely be empty)
+        await get().fetchRiskCauses(uprId, period, actualUserId);
         return;
       }
       
       let allPRs: PotentialRisk[] = [];
       for (const goal of currentGoals) {
           const prs = await getPotentialRisksByGoalIdFromService(goal.id, uprId, period, actualUserId);
-          allPRs.push(...prs.map(pr => ({...pr, uprId, period}))); // Ensure UPR context
+          allPRs.push(...prs); 
       }
       const sortedPRs = allPRs.sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
       set({ potentialRisks: sortedPRs, potentialRisksLoading: false });
       console.log(`[AppStore] PotentialRisks fetched for UPR ${uprId}: ${sortedPRs.length}. Triggering cause fetch.`);
       await get().fetchRiskCauses(uprId, period, actualUserId);
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in fetchPotentialRisks:", errorMessage);
         set({ potentialRisks: [], potentialRisksLoading: false, dataFetchedForUprPeriod: null });
@@ -329,95 +354,112 @@ export const useAppStore = create<AppState>((set, get) => ({
         throw new Error(`Gagal memuat potensi risiko dari store: ${errorMessage}`);
     }
   },
-  addPotentialRiskToStore: async (data, goalId, uprId, period, actualUserId, sequenceNumber) => { 
-    console.log(`[AppStore] Adding potential risk to Goal: ${goalId} in UPR: ${uprId}`);
+  addPotentialRiskToStore: async (data, goalId, sequenceNumber) => { 
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah potensi risiko.");
+    console.log(`[AppStore] Adding potential risk to Goal: ${goalId} in UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}, User ID for record=${activeUserId}`);
     try {
-      const newPR = await addPotentialRiskToService(data, goalId, uprId, period, actualUserId, sequenceNumber);
+      const newPR = await addPotentialRiskToService(data, goalId, activeUprId, activePeriod, activeUserId, sequenceNumber);
       set(state => ({
         potentialRisks: [...state.potentialRisks, newPR].sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`))
       }));
       return newPR;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in addPotentialRiskToStore:", errorMessage);
         throw new Error(`Gagal menambahkan potensi risiko di store: ${errorMessage}`);
     }
   },
   updatePotentialRiskInStore: async (potentialRiskId, updatedData) => {
-    console.log(`[AppStore] Updating potential risk ID: ${potentialRiskId}`);
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memperbarui potensi risiko.");
+    console.log(`[AppStore] Updating potential risk ID: ${potentialRiskId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
       await updatePotentialRiskInService(potentialRiskId, updatedData);
-      let prUprId = "";
-      let prPeriod = "";
+      let prUprIdForRefetch = "";
+      let prPeriodForRefetch = "";
       set(state => {
         const newPotentialRisks = state.potentialRisks.map(pr =>{
           if (pr.id === potentialRiskId) {
-            prUprId = pr.uprId; 
-            prPeriod = pr.period;
-            return { ...pr, ...updatedData, updatedAt: new Date().toISOString() };
+            prUprIdForRefetch = pr.uprId; 
+            prPeriodForRefetch = pr.period;
+            return { ...pr, ...updatedData, userId: activeUserId, updatedAt: new Date().toISOString() }; // Update userId to current editor
           }
           return pr;
         }).sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
         return { potentialRisks: newPotentialRisks };
       });
-      if(prUprId && prPeriod && get().activeUprId){ // Refetch RCs for this PR's context
-         await get().fetchRiskCauses(prUprId, prPeriod, get().activeUprId!);
+      if(prUprIdForRefetch && prPeriodForRefetch && activeUserId){ 
+         await get().fetchRiskCauses(prUprIdForRefetch, prPeriodForRefetch, activeUserId);
       }
       const updatedPR = get().potentialRisks.find(pr => pr.id === potentialRiskId);
       return updatedPR || null;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in updatePotentialRiskInStore:", errorMessage);
         throw new Error(`Gagal memperbarui potensi risiko di store: ${errorMessage}`);
     }
   },
-  deletePotentialRiskFromStore: async (potentialRiskId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Deleting potential risk ID: ${potentialRiskId} from UPR: ${uprId}`);
+  deletePotentialRiskFromStore: async (potentialRiskId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus potensi risiko.");
+    console.log(`[AppStore] Deleting potential risk ID: ${potentialRiskId} from UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await deletePotentialRiskFromService(potentialRiskId, uprId, period); // Pass uprId and period
+      await deletePotentialRiskFromService(potentialRiskId, activeUprId, activePeriod);
       set(state => ({
         potentialRisks: state.potentialRisks.filter(pr => pr.id !== potentialRiskId),
-        riskCauses: state.riskCauses.filter(rc => rc.potentialRiskId !== potentialRiskId && rc.uprId === uprId && rc.period === period), 
-        controlMeasures: state.controlMeasures.filter(cm => cm.potentialRiskId !== potentialRiskId && cm.uprId === uprId && cm.period === period), 
+        riskCauses: state.riskCauses.filter(rc => !(rc.potentialRiskId === potentialRiskId && rc.uprId === activeUprId && rc.period === activePeriod)), 
+        controlMeasures: state.controlMeasures.filter(cm => !(cm.potentialRiskId === potentialRiskId && cm.uprId === activeUprId && cm.period === activePeriod)), 
       }));
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in deletePotentialRiskFromStore:", errorMessage);
         throw new Error(`Gagal menghapus potensi risiko dari store: ${errorMessage}`);
     }
   },
-  getPotentialRiskById: async (potentialRiskId, uprId, period) => {
-    const existingPR = get().potentialRisks.find(pr => pr.id === potentialRiskId && pr.uprId === uprId && pr.period === period);
+  getPotentialRiskById: async (potentialRiskId) => {
+    const { activeUprId, activePeriod } = get();
+    if (!activeUprId || !activePeriod) return null;
+    const existingPR = get().potentialRisks.find(pr => pr.id === potentialRiskId && pr.uprId === activeUprId && pr.period === activePeriod);
     if (existingPR) return existingPR;
     try {
-      return await getPotentialRiskByIdFromService(potentialRiskId, uprId, period); // Pass uprId and period
-    } catch (error) { /* ... error handling ... */ 
+      const prFromService = await getPotentialRiskByIdFromService(potentialRiskId, activeUprId, activePeriod);
+      if(prFromService) set(state => ({ potentialRisks: Array.from(new Set([...state.potentialRisks, prFromService])).sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`)) }));
+      return prFromService || null;
+    } catch (error) { 
         console.error(`[AppStore] Error in getPotentialRiskById from service for ${potentialRiskId}:`, error);
         return null;
     }
   },
 
+  // --- RiskCauses ---
   fetchRiskCauses: async (uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching risk causes for UPR: ${uprId}, Period: ${period}`);
+    const state = get();
+    if (state.activeUprId !== uprId || state.activePeriod !== period) {
+      console.warn(`[AppStore] fetchRiskCauses: Context mismatch. Store: ${state.activeUprId}|${state.activePeriod}, Requested: ${uprId}|${period}. Aborting fetch.`);
+      set({ riskCausesLoading: false });
+      return;
+    }
+    console.log(`[AppStore] Fetching risk causes for UPR: ${uprId}, Period: ${period}. Current activeUserId: ${state.activeUserId}`);
     set({ riskCausesLoading: true });
     try {
       const currentPRs = get().potentialRisks.filter(pr => pr.uprId === uprId && pr.period === period);
       if (currentPRs.length === 0 && !get().potentialRisksLoading) {
         console.log("[AppStore] No PRs for current UPR/Period or PRs still loading, skipping RC fetch.");
         set({ riskCauses: [], riskCausesLoading: false });
-        await get().fetchControlMeasures(uprId, period, actualUserId); // Proceed to fetch CMs (likely empty)
+        await get().fetchControlMeasures(uprId, period, actualUserId);
         return;
       }
       let allRCs: RiskCause[] = [];
       for (const pr of currentPRs) {
           const rcs = await getRiskCausesByPotentialRiskIdFromService(pr.id, uprId, period, actualUserId);
-          allRCs.push(...rcs.map(rc => ({...rc, uprId, period}))); // Ensure UPR context
+          allRCs.push(...rcs);
       }
       const sortedRCs = allRCs.sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
       set({ riskCauses: sortedRCs, riskCausesLoading: false });
       console.log(`[AppStore] RiskCauses fetched for UPR ${uprId}: ${sortedRCs.length}. Triggering CM fetch.`);
       await get().fetchControlMeasures(uprId, period, actualUserId);
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in fetchRiskCauses:", errorMessage);
         set({ riskCauses: [], riskCausesLoading: false, dataFetchedForUprPeriod: null });
@@ -425,84 +467,101 @@ export const useAppStore = create<AppState>((set, get) => ({
         throw new Error(`Gagal memuat penyebab risiko dari store: ${errorMessage}`);
     }
   },
-  addRiskCauseToStore: async (data, potentialRiskId, goalId, uprId, period, actualUserId, sequenceNumber) => { 
-    console.log(`[AppStore] Adding risk cause to PR: ${potentialRiskId} in UPR: ${uprId}`);
+  addRiskCauseToStore: async (data, potentialRiskId, goalId, sequenceNumber) => { 
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah penyebab risiko.");
+     console.log(`[AppStore] Adding risk cause to PR: ${potentialRiskId} in UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}, User ID for record=${activeUserId}`);
     try {
-      const newRC = await addRiskCauseToService(data, potentialRiskId, goalId, uprId, period, actualUserId, sequenceNumber);
+      const newRC = await addRiskCauseToService(data, potentialRiskId, goalId, activeUprId, activePeriod, activeUserId, sequenceNumber);
       set(state => ({
         riskCauses: [...state.riskCauses, newRC].sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`))
       }));
       return newRC;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in addRiskCauseToStore:", errorMessage);
         throw new Error(`Gagal menambahkan penyebab risiko di store: ${errorMessage}`);
     }
   },
   updateRiskCauseInStore: async (riskCauseId, updatedData) => {
-    console.log(`[AppStore] Updating risk cause ID: ${riskCauseId}`);
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memperbarui penyebab risiko.");
+    console.log(`[AppStore] Updating risk cause ID: ${riskCauseId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await updateRiskCauseInService(riskCauseId, updatedData);
-      let rcUprId = "";
-      let rcPeriod = "";
+      await updateRiskCauseInService(riskCauseId, updatedData); // Service handles its own context validation if needed
+      let rcUprIdForRefetch = "";
+      let rcPeriodForRefetch = "";
       set(state => {
         const newRiskCauses = state.riskCauses.map(rc =>{
           if (rc.id === riskCauseId) {
-             rcUprId = rc.uprId;
-             rcPeriod = rc.period;
-            return { ...rc, ...updatedData, analysisUpdatedAt: new Date().toISOString() };
+             rcUprIdForRefetch = rc.uprId;
+             rcPeriodForRefetch = rc.period;
+            return { ...rc, ...updatedData, userId: activeUserId, analysisUpdatedAt: new Date().toISOString() }; // Update userId to current editor
           }
           return rc;
         }).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
         return { riskCauses: newRiskCauses };
       });
-      if(rcUprId && rcPeriod && get().activeUprId){ // Refetch CMs for this RC's context
-         await get().fetchControlMeasures(rcUprId, rcPeriod, get().activeUprId!, riskCauseId);
+      if(rcUprIdForRefetch && rcPeriodForRefetch && activeUserId){ 
+         await get().fetchControlMeasures(rcUprIdForRefetch, rcPeriodForRefetch, activeUserId, riskCauseId);
       }
       const updatedRC = get().riskCauses.find(rc => rc.id === riskCauseId);
       return updatedRC || null;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in updateRiskCauseInStore:", errorMessage);
         throw new Error(`Gagal memperbarui penyebab risiko di store: ${errorMessage}`);
     }
   },
-  deleteRiskCauseFromStore: async (riskCauseId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Deleting risk cause ID: ${riskCauseId} from UPR: ${uprId}`);
+  deleteRiskCauseFromStore: async (riskCauseId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus penyebab risiko.");
+    console.log(`[AppStore] Deleting risk cause ID: ${riskCauseId} from UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await deleteRiskCauseFromService(riskCauseId, uprId, period); // Pass uprId and period
+      await deleteRiskCauseFromService(riskCauseId, activeUprId, activePeriod);
       set(state => ({
         riskCauses: state.riskCauses.filter(rc => rc.id !== riskCauseId),
-        controlMeasures: state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId && cm.uprId === uprId && cm.period === period), 
+        controlMeasures: state.controlMeasures.filter(cm => !(cm.riskCauseId === riskCauseId && cm.uprId === activeUprId && cm.period === activePeriod)), 
       }));
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in deleteRiskCauseFromStore:", errorMessage);
         throw new Error(`Gagal menghapus penyebab risiko dari store: ${errorMessage}`);
     }
   },
-  getRiskCauseById: async (riskCauseId, uprId, period) => {
-    const existingRC = get().riskCauses.find(rc => rc.id === riskCauseId && rc.uprId === uprId && rc.period === period);
+  getRiskCauseById: async (riskCauseId) => {
+    const { activeUprId, activePeriod } = get();
+    if (!activeUprId || !activePeriod) return null;
+    const existingRC = get().riskCauses.find(rc => rc.id === riskCauseId && rc.uprId === activeUprId && rc.period === activePeriod);
     if (existingRC) return existingRC;
     try {
-      return await getRiskCauseByIdFromService(riskCauseId, uprId, period); // Pass uprId and period
-    } catch (error) { /* ... error handling ... */ 
+      const rcFromService = await getRiskCauseByIdFromService(riskCauseId, activeUprId, activePeriod);
+      if(rcFromService) set(state => ({ riskCauses: Array.from(new Set([...state.riskCauses, rcFromService])).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`)) }));
+      return rcFromService || null;
+    } catch (error) { 
         console.error(`[AppStore] Error in getRiskCauseById from service for ${riskCauseId}:`, error);
         return null;
     }
   },
 
+  // --- ControlMeasures ---
   fetchControlMeasures: async (uprId, period, actualUserId, riskCauseId_optional?: string) => {
-    console.log(`[AppStore] Fetching CMs. UPR: ${uprId}, Period: ${period}, RC_ID(opt): ${riskCauseId_optional}`);
+    const state = get();
+     if (state.activeUprId !== uprId || state.activePeriod !== period) {
+      console.warn(`[AppStore] fetchControlMeasures: Context mismatch. Store: ${state.activeUprId}|${state.activePeriod}, Requested: ${uprId}|${period}. Aborting fetch.`);
+      set({ controlMeasuresLoading: false });
+      return;
+    }
+    console.log(`[AppStore] Fetching CMs. UPR: ${uprId}, Period: ${period}, RC_ID(opt): ${riskCauseId_optional}. Current activeUserId: ${state.activeUserId}`);
     set({ controlMeasuresLoading: true });
     try {
       let allCMs: ControlMeasure[] = [];
       if (riskCauseId_optional) { 
         allCMs = await fetchControlMeasuresByRiskCauseIdFromService(riskCauseId_optional, uprId, period, actualUserId);
-        set(state => ({
+        set(current => ({
           controlMeasures: [ 
-            ...state.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional || cm.uprId !== uprId || cm.period !== period), // Remove old for this specific cause
-            ...allCMs.map(cm => ({...cm, uprId, period})) // Add new with correct context
+            ...current.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional || cm.uprId !== uprId || cm.period !== period),
+            ...allCMs
           ].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`)),
         }));
       } else { 
@@ -513,180 +572,208 @@ export const useAppStore = create<AppState>((set, get) => ({
         } else {
           for (const rc of currentRCs) {
               const cms = await fetchControlMeasuresByRiskCauseIdFromService(rc.id, uprId, period, actualUserId);
-              allCMs.push(...cms.map(cm => ({...cm, uprId, period}))); // Ensure context
+              allCMs.push(...cms);
           }
           const sortedCMs = allCMs.sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`));
           set({ controlMeasures: sortedCMs });
         }
       }
       set({ controlMeasuresLoading: false });
-      console.log(`[AppStore] ControlMeasures fetched for UPR ${uprId}: ${allCMs.length}. Global data fetch for ${uprId}|${period} complete.`);
-    } catch (error) { /* ... error handling ... */ 
+      console.log(`[AppStore] ControlMeasures fetched for UPR ${uprId}: ${allCMs.length}. Global data fetch for ${uprId}|${period} considered complete for core entities.`);
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in fetchControlMeasures:", errorMessage);
         set({ controlMeasures: [], controlMeasuresLoading: false, dataFetchedForUprPeriod: null }); 
         throw new Error(`Gagal memuat tindakan pengendalian dari store: ${errorMessage}`);
     }
   },
-  addControlMeasureToStore: async (data, riskCauseId, potentialRiskId, goalId, uprId, period, actualUserId, controlType) => { 
-    console.log(`[AppStore] Adding CM to RC: ${riskCauseId} in UPR: ${uprId} type: ${controlType}`);
+  addControlMeasureToStore: async (data, riskCauseId, potentialRiskId, goalId, controlType) => { 
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah pengendalian.");
+    console.log(`[AppStore] Adding CM to RC: ${riskCauseId} in UPR: ${activeUprId} type: ${controlType}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}, User ID for record=${activeUserId}`);
     try {
-      const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, uprId, period, actualUserId, controlType); 
+      const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, activeUprId, activePeriod, activeUserId, controlType); 
       set(state => ({
         controlMeasures: [...state.controlMeasures, newCM].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
       }));
       return newCM;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in addControlMeasureToStore:", errorMessage);
         throw new Error(`Gagal menambahkan tindakan pengendalian di store: ${errorMessage}`);
     }
   },
   updateControlMeasureInStore: async (controlMeasureId, updatedData) => {
-     console.log(`[AppStore] Updating control measure ID: ${controlMeasureId}`);
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memperbarui pengendalian.");
+    console.log(`[AppStore] Updating control measure ID: ${controlMeasureId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await updateControlMeasureInService(controlMeasureId, updatedData);
+      await updateControlMeasureInService(controlMeasureId, updatedData); // Service handles its own context validation if needed
       set(state => {
         const newControlMeasures = state.controlMeasures.map(cm => 
-            cm.id === controlMeasureId ? { ...cm, ...updatedData, updatedAt: new Date().toISOString() } : cm
+            cm.id === controlMeasureId ? { ...cm, ...updatedData, userId: activeUserId, updatedAt: new Date().toISOString() } : cm // Update userId to current editor
           ).sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`));
         return { controlMeasures: newControlMeasures };
       });
       const updatedCM = get().controlMeasures.find(cm => cm.id === controlMeasureId);
       return updatedCM || null;
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in updateControlMeasureInStore:", errorMessage);
         throw new Error(`Gagal memperbarui tindakan pengendalian di store: ${errorMessage}`);
     }
   },
-  deleteControlMeasureFromStore: async (controlMeasureId, uprId, period) => { 
-    console.log(`[AppStore] Deleting CM ID: ${controlMeasureId} from UPR: ${uprId}, Period: ${period}`);
+  deleteControlMeasureFromStore: async (controlMeasureId) => { 
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus pengendalian.");
+    console.log(`[AppStore] Deleting CM ID: ${controlMeasureId} from UPR: ${activeUprId}, Period: ${activePeriod}`);
     try {
-      // Validate if CM belongs to current UPR/Period before deleting from service
       const cmToDelete = get().controlMeasures.find(cm => cm.id === controlMeasureId);
-      if (cmToDelete && cmToDelete.uprId === uprId && cmToDelete.period === period) {
+      if (cmToDelete && cmToDelete.uprId === activeUprId && cmToDelete.period === activePeriod) {
         await deleteControlMeasureFromService(controlMeasureId);
         set(state => ({
           controlMeasures: state.controlMeasures.filter(cm => cm.id !== controlMeasureId)
         }));
       } else if (cmToDelete) {
         console.warn(`[AppStore] CM ${controlMeasureId} does not match context UPR/Period. Not deleting from service.`);
-        set(state => ({ controlMeasures: state.controlMeasures.filter(cm => cm.id !== controlMeasureId) })); // Still remove from local store
+        set(state => ({ controlMeasures: state.controlMeasures.filter(cm => cm.id !== controlMeasureId) })); 
       } else {
         console.warn(`[AppStore] CM ${controlMeasureId} not found in local store.`);
       }
-    } catch (error) { /* ... error handling ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in deleteControlMeasureFromStore:", errorMessage);
         throw new Error(`Gagal menghapus tindakan pengendalian dari store: ${errorMessage}`);
     }
   },
-  getControlMeasureById: async (controlMeasureId, uprId, period) => {
-    const existingCM = get().controlMeasures.find(cm => cm.id === controlMeasureId && cm.uprId === uprId && cm.period === period);
+  getControlMeasureById: async (controlMeasureId) => {
+    const { activeUprId, activePeriod } = get();
+    if (!activeUprId || !activePeriod) return null;
+    const existingCM = get().controlMeasures.find(cm => cm.id === controlMeasureId && cm.uprId === activeUprId && cm.period === activePeriod);
     if (existingCM) return existingCM;
     try {
-      return await getControlMeasureByIdFromService(controlMeasureId, uprId, period); // Pass uprId and period
-    } catch (error) { /* ... error handling ... */ 
+      const cmFromService = await getControlMeasureByIdFromService(controlMeasureId, activeUprId, activePeriod);
+      if(cmFromService) set(state => ({ controlMeasures: Array.from(new Set([...state.controlMeasures, cmFromService])).sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`)) }));
+      return cmFromService || null;
+    } catch (error) { 
         console.error(`[AppStore] Error in getControlMeasureById from service for ${controlMeasureId}:`, error);
         return null;
     }
   },
   
+  // --- Monitoring Sessions ---
   fetchMonitoringSessions: async (uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching monitoring sessions for UPR: ${uprId}, Period: ${period}`);
+    const state = get();
+    if (state.activeUprId !== uprId || state.activePeriod !== period) {
+      console.warn(`[AppStore] fetchMonitoringSessions: Context mismatch. Store: ${state.activeUprId}|${state.activePeriod}, Requested: ${uprId}|${period}. Aborting fetch.`);
+      set({ monitoringSessionsLoading: false });
+      return;
+    }
+    console.log(`[AppStore] Fetching monitoring sessions for UPR: ${uprId}, Period: ${period}. Current activeUserId: ${state.activeUserId}`);
     set({ monitoringSessionsLoading: true });
     try {
-      const sessions = await getMonitoringSessionsFromService(uprId, period, actualUserId); // Pass uprId and period
+      const sessions = await getMonitoringSessionsFromService(uprId, period, actualUserId);
       set({ monitoringSessions: sessions, monitoringSessionsLoading: false });
       console.log(`[AppStore] Monitoring sessions fetched for UPR ${uprId}: ${sessions.length}.`);
-    } catch (error) { /* ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in fetchMonitoringSessions:", errorMessage);
         set({ monitoringSessions: [], monitoringSessionsLoading: false });
         throw new Error(`Gagal memuat sesi pemantauan dari store: ${errorMessage}`);
     }
   },
-  addMonitoringSessionToState: async (sessionData, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Adding monitoring session for UPR: ${uprId}, Period: ${period}`);
+  addMonitoringSessionToState: async (sessionData) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah sesi pemantauan.");
+    console.log(`[AppStore] Adding monitoring session. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}, User ID for record=${activeUserId}`);
     try {
-      const newSession = await addMonitoringSessionToService(sessionData, uprId, period, actualUserId); // Pass uprId and period
+      const newSession = await addMonitoringSessionToService(sessionData, activeUprId, activePeriod, activeUserId);
       set(state => ({
         monitoringSessions: [...state.monitoringSessions, newSession].sort((a,b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
       }));
       return newSession;
-    } catch (error) { /* ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in addMonitoringSessionToState:", errorMessage);
         throw new Error(`Gagal menambahkan sesi pemantauan di store: ${errorMessage}`);
     }
   },
-  updateMonitoringSessionStatusInState: async (sessionId, status, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Updating status for session ID: ${sessionId} to ${status}`);
+  updateMonitoringSessionStatusInState: async (sessionId, status) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memperbarui status sesi.");
+    console.log(`[AppStore] Updating status for session ID: ${sessionId} to ${status}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await updateMonitoringSessionStatusInService(sessionId, status); // Context check within service
-      const updatedSession = await getMonitoringSessionByIdFromService(sessionId, uprId, period); // Pass uprId and period
+      // Service should validate if this user can update this session under this UPR/Period
+      await updateMonitoringSessionStatusInService(sessionId, status); 
+      const updatedSession = await getMonitoringSessionByIdFromService(sessionId, activeUprId, activePeriod); 
       if(updatedSession){
         set(state => ({
-          monitoringSessions: state.monitoringSessions.map(s => s.id === sessionId ? updatedSession : s)
+          monitoringSessions: state.monitoringSessions.map(s => s.id === sessionId ? { ...updatedSession, userId: activeUserId } : s) // Update userId to current editor
         }));
         return updatedSession;
       }
       return null;
-    } catch (error) { /* ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in updateMonitoringSessionStatusInState:", errorMessage);
         throw new Error(`Gagal memperbarui status sesi pemantauan di store: ${errorMessage}`);
     }
   },
-  deleteMonitoringSessionFromState: async (sessionId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Deleting session ID: ${sessionId} from UPR: ${uprId}`);
+  deleteMonitoringSessionFromState: async (sessionId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus sesi.");
+    console.log(`[AppStore] Deleting session ID: ${sessionId} from UPR: ${activeUprId}. Store Context: UPR ID=${activeUprId}, Period=${activePeriod}`);
     try {
-      await deleteMonitoringSessionFromService(sessionId, uprId, period); // Pass uprId and period
+      await deleteMonitoringSessionFromService(sessionId, activeUprId, activePeriod);
       set(state => ({
         monitoringSessions: state.monitoringSessions.filter(s => s.id !== sessionId),
-        riskExposures: state.riskExposures.filter(re => re.monitoringSessionId !== sessionId && re.uprId === uprId && re.period === period), 
-        monitoredControlMeasuresData: state.monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId !== sessionId && mcmd.uprId === uprId && mcmd.period === period),
+        riskExposures: state.riskExposures.filter(re => !(re.monitoringSessionId === sessionId && re.uprId === activeUprId && re.period === activePeriod)), 
+        monitoredControlMeasuresData: state.monitoredControlMeasuresData.filter(mcmd => !(mcmd.monitoringSessionId === sessionId && mcmd.uprId === activeUprId && mcmd.period === activePeriod)),
       }));
-    } catch (error) { /* ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("[AppStore] Error in deleteMonitoringSessionFromState:", errorMessage);
         throw new Error(`Gagal menghapus sesi pemantauan dari store: ${errorMessage}`);
     }
   },
   getMonitoringSessionByIdFromState: (sessionId) => {
-    const currentUprId = get().activeUprId;
-    const currentPeriod = get().activePeriod;
-    return get().monitoringSessions.find(s => s.id === sessionId && s.uprId === currentUprId && s.period === currentPeriod) || null;
+    const { activeUprId, activePeriod } = get();
+    if (!activeUprId || !activePeriod) return null;
+    return get().monitoringSessions.find(s => s.id === sessionId && s.uprId === activeUprId && s.period === activePeriod) || null;
   },
 
-  fetchRiskExposuresForSession: async (sessionId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching risk exposures for Session: ${sessionId}, UPR: ${uprId}, Period: ${period}`);
+  // --- RiskExposures ---
+  fetchRiskExposuresForSession: async (sessionId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memuat paparan risiko.");
+    console.log(`[AppStore] Fetching risk exposures for Session: ${sessionId}, UPR: ${activeUprId}, Period: ${activePeriod}. Current activeUserId: ${activeUserId}`);
     set({ riskExposuresLoading: true });
     try {
-      const exposures = await getRiskExposuresBySessionFromService(sessionId, uprId, period, actualUserId); // Pass uprId and period
+      const exposures = await getRiskExposuresBySessionFromService(sessionId, activeUprId, activePeriod, activeUserId);
       set(state => ({
         riskExposures: [
-          ...state.riskExposures.filter(re => re.monitoringSessionId !== sessionId || re.uprId !== uprId || re.period !== period),
-          ...exposures.map(ex => ({...ex, uprId, period})) // Ensure context
+          ...state.riskExposures.filter(re => re.monitoringSessionId !== sessionId || re.uprId !== activeUprId || re.period !== activePeriod),
+          ...exposures
         ],
         riskExposuresLoading: false,
       }));
-      console.log(`[AppStore] Risk exposures fetched for session ${sessionId} (UPR ${uprId}): ${exposures.length}`);
-    } catch (error) { /* ... */ 
+      console.log(`[AppStore] Risk exposures fetched for session ${sessionId} (UPR ${activeUprId}): ${exposures.length}`);
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[AppStore] Error in fetchRiskExposuresForSession (Session: ${sessionId}, UPR: ${uprId}):`, errorMessage);
+        console.error(`[AppStore] Error in fetchRiskExposuresForSession (Session: ${sessionId}, UPR: ${activeUprId}):`, errorMessage);
         set({ riskExposuresLoading: false }); 
         throw new Error(`Gagal memuat data paparan risiko dari store: ${errorMessage}`);
     }
   },
-  upsertRiskExposureInState: async (exposureData, uprId, period, actualUserId) => {
-     console.log(`[AppStore] Upserting risk exposure for RC: ${exposureData.riskCauseId} in Session: ${exposureData.monitoringSessionId}, UPR: ${uprId}`);
+  upsertRiskExposureInState: async (exposureData) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menyimpan paparan risiko.");
+    console.log(`[AppStore] Upserting risk exposure for RC: ${exposureData.riskCauseId} in Session: ${exposureData.monitoringSessionId}, UPR: ${activeUprId}. Store Context: User ID for record=${activeUserId}`);
     try {
-      const upsertedExposureFromService = await upsertRiskExposureToService(exposureData, uprId, period, actualUserId); // Pass uprId and period
+      const upsertedExposureFromService = await upsertRiskExposureToService(exposureData, activeUprId, activePeriod, activeUserId);
       set(state => {
         const index = state.riskExposures.findIndex(
-          re => re.monitoringSessionId === upsertedExposureFromService.monitoringSessionId && re.riskCauseId === upsertedExposureFromService.riskCauseId && re.uprId === uprId && re.period === period
+          re => re.monitoringSessionId === upsertedExposureFromService.monitoringSessionId && re.riskCauseId === upsertedExposureFromService.riskCauseId && re.uprId === activeUprId && re.period === activePeriod
         );
         if (index !== -1) {
           const updatedExposures = [...state.riskExposures];
@@ -696,69 +783,60 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { riskExposures: [...state.riskExposures, upsertedExposureFromService] };
       });
       return upsertedExposureFromService;
-    } catch (error) { /* ... */ 
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[AppStore] upsertRiskExposureInState (CauseID: ${exposureData.riskCauseId}, UPR: ${uprId}): Failed:`, errorMessage);
+        console.error(`[AppStore] upsertRiskExposureInState (CauseID: ${exposureData.riskCauseId}, UPR: ${activeUprId}): Failed:`, errorMessage);
         throw new Error(`Gagal menyimpan paparan risiko di store: ${errorMessage}`);
     }
   },
 
-  fetchMonitoredControlMeasuresForSession: async (sessionId, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Fetching monitored CMs for Session: ${sessionId}, UPR: ${uprId}`);
+  // --- MonitoredControlMeasuresData ---
+  fetchMonitoredControlMeasuresForSession: async (sessionId) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk memuat data pemantauan kontrol.");
+    console.log(`[AppStore] Fetching monitored CMs for Session: ${sessionId}, UPR: ${activeUprId}. Current activeUserId: ${activeUserId}`);
     set({ monitoredControlMeasuresLoading: true });
     try {
-      // Placeholder: Replace with actual service call
-      // const mcms = await getMonitoredCMsFromService(sessionId, uprId, period, actualUserId); 
-      const mcms: MonitoredControlMeasureData[] = []; // Mocked empty array
-      console.log(`[AppStore] Monitored CMs fetched for session ${sessionId} (UPR ${uprId}): ${mcms.length} (mocked)`);
+      const mcms = await getMonitoredControlMeasuresBySessionFromService(sessionId, activeUprId, activePeriod, activeUserId); 
       set(state => ({
         monitoredControlMeasuresData: [
-          ...state.monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId !== sessionId || mcmd.uprId !== uprId || mcmd.period !== period),
-          ...mcms.map(mcmd => ({...mcmd, uprId, period})) // Ensure context
+          ...state.monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId !== sessionId || mcmd.uprId !== activeUprId || mcmd.period !== activePeriod),
+          ...mcms
         ],
         monitoredControlMeasuresLoading: false,
       }));
-    } catch (error) { /* ... */ 
+      console.log(`[AppStore] Monitored CMs fetched for session ${sessionId} (UPR ${activeUprId}): ${mcms.length}`);
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[AppStore] Error in fetchMonitoredCMsForSession (Session: ${sessionId}, UPR: ${uprId}):`, errorMessage);
+        console.error(`[AppStore] Error in fetchMonitoredCMsForSession (Session: ${sessionId}, UPR: ${activeUprId}):`, errorMessage);
         set({ monitoredControlMeasuresLoading: false });
+        throw new Error(`Gagal memuat data pemantauan kontrol dari store: ${errorMessage}`);
     }
   },
-  upsertMonitoredControlMeasureInState: async (mcmData, uprId, period, actualUserId) => {
-    console.log(`[AppStore] Upserting monitored CM data for Control: ${mcmData.controlMeasureId} in UPR: ${uprId}`);
+  upsertMonitoredControlMeasureInState: async (mcmData) => {
+    const { activeUprId, activePeriod, activeUserId } = get();
+    if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menyimpan data pemantauan kontrol.");
+    console.log(`[AppStore] Upserting monitored CM data for Control: ${mcmData.controlMeasureId} in UPR: ${activeUprId}. Store Context: User ID for record=${activeUserId}`);
     try {
-      // Placeholder: Replace with actual service call
-      // const upsertedMCMFromService = await upsertMCMToService(mcmData, uprId, period, actualUserId);
-      const mockId = `${mcmData.monitoringSessionId}_${mcmData.controlMeasureId}_${mcmData.riskCauseId}`; // More unique mock ID
-      const existingMCM = get().monitoredControlMeasuresData.find(m => m.id === mockId && m.uprId === uprId && m.period === period);
-      const upsertedMCM: MonitoredControlMeasureData = {
-        ...mcmData,
-        id: existingMCM?.id || mockId, 
-        uprId, 
-        userId: actualUserId,
-        period,
-        recordedAt: existingMCM?.recordedAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
+      const upsertedMCMFromService = await upsertMonitoredControlMeasureToService(mcmData, activeUprId, activePeriod, activeUserId);
       set(state => {
         const index = state.monitoredControlMeasuresData.findIndex(
-          m => m.monitoringSessionId === upsertedMCM.monitoringSessionId && 
-               m.controlMeasureId === upsertedMCM.controlMeasureId && 
-               m.riskCauseId === upsertedMCM.riskCauseId && // Check riskCauseId too
-               m.uprId === uprId && m.period === period
+          m => m.monitoringSessionId === upsertedMCMFromService.monitoringSessionId && 
+               m.controlMeasureId === upsertedMCMFromService.controlMeasureId && 
+               m.riskCauseId === upsertedMCMFromService.riskCauseId && 
+               m.uprId === activeUprId && m.period === activePeriod
         );
         if (index !== -1) {
           const updatedMCMs = [...state.monitoredControlMeasuresData];
-          updatedMCMs[index] = upsertedMCM;
+          updatedMCMs[index] = upsertedMCMFromService;
           return { monitoredControlMeasuresData: updatedMCMs };
         }
-        return { monitoredControlMeasuresData: [...state.monitoredControlMeasuresData, upsertedMCM] };
+        return { monitoredControlMeasuresData: [...state.monitoredControlMeasuresData, upsertedMCMFromService] };
       });
-      return upsertedMCM;
-    } catch (error) { /* ... */ 
+      return upsertedMCMFromService;
+    } catch (error) { 
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[AppStore] upsertMonitoredCMInState (ControlID: ${mcmData.controlMeasureId}, UPR: ${uprId}): Failed:`, errorMessage);
+        console.error(`[AppStore] upsertMonitoredCMInState (ControlID: ${mcmData.controlMeasureId}, UPR: ${activeUprId}): Failed:`, errorMessage);
         throw new Error(`Gagal menyimpan data pemantauan kontrol di store: ${errorMessage}`);
     }
   },

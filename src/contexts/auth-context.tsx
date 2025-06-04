@@ -24,32 +24,29 @@ const DEFAULT_INITIAL_PERIOD = new Date().getFullYear().toString();
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
-  const [authLoadingInternal, setAuthLoadingInternal] = useState(true);
-  const [profileLoadingInternal, setProfileLoadingInternal] = useState(true);
+  const [authContextLoading, setAuthContextLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true); // Start as true
   const [isProfileComplete, setIsProfileComplete] = useState(false);
 
   const fetchAppUser = useCallback(async (user: FirebaseUser | null) => {
     console.log("[AuthContext] fetchAppUser: Called with user:", user ? user.uid : "null");
     if (user) {
-      console.log("[AuthContext] fetchAppUser: Setting profileLoadingInternal to true for UID:", user.uid);
-      setProfileLoadingInternal(true);
+      console.log("[AuthContext] fetchAppUser: Setting profileLoading to true for UID:", user.uid);
+      setProfileLoading(true);
       try {
         const userDoc = await getUserDocument(user.uid);
         console.log("[AuthContext] fetchAppUser: AppUser data from Firestore for UID", user.uid, ":", JSON.stringify(userDoc));
         if (userDoc) {
           setAppUser(userDoc);
-          // isProfileComplete now heavily depends on uprId being assigned (for userSatker)
-          // and other core profile fields.
+          // Profile is complete if displayName, activePeriod, availablePeriods, AND uprId are present.
           const profileIsConsideredComplete = !!(
             userDoc.displayName &&
-            userDoc.uprId && // uprId (Firestore doc ID) must exist
             userDoc.activePeriod &&
-            userDoc.availablePeriods &&
-            userDoc.availablePeriods.length > 0
-            // Role 'userSatker' doesn't need assignedUprId anymore if uprId itself is the assignment.
+            userDoc.availablePeriods && userDoc.availablePeriods.length > 0 &&
+            userDoc.uprId // uprId must be present and not null/undefined
           );
           setIsProfileComplete(profileIsConsideredComplete);
-          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Based on UPR ID:", userDoc.uprId);
+          console.log(`[AuthContext] fetchAppUser: Profile complete for UID ${user.uid}? ${profileIsConsideredComplete}. DisplayName: ${userDoc.displayName}, ActivePeriod: ${userDoc.activePeriod}, UPR ID from Firestore: ${userDoc.uprId}`);
         } else {
           setAppUser(null);
           setIsProfileComplete(false);
@@ -61,30 +58,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAppUser(null);
         setIsProfileComplete(false);
       } finally {
-        console.log("[AuthContext] fetchAppUser: Setting profileLoadingInternal to false for UID:", user ? user.uid : "null");
-        setProfileLoadingInternal(false);
+        console.log("[AuthContext] fetchAppUser: Setting profileLoading to false for UID:", user ? user.uid : "null");
+        setProfileLoading(false);
       }
     } else {
-      console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states. Setting profileLoadingInternal to false.");
+      console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states. Setting profileLoading to false.");
       setAppUser(null);
       setIsProfileComplete(false);
-      setProfileLoadingInternal(false);
+      setProfileLoading(false); // Ensure profileLoading is false if no user
     }
   }, []);
 
   useEffect(() => {
     console.log("[AuthContext] onAuthStateChanged listener attaching.");
-    setAuthLoadingInternal(true);
+    setAuthContextLoading(true);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log("[AuthContext] onAuthStateChanged: Firebase user state is:", user ? user.uid : "null");
+      console.log("[AuthContext] onAuthStateChanged: Firebase user state changed. New user:", user ? user.uid : "null");
       setCurrentUser(user);
       try {
         await fetchAppUser(user);
       } catch (error) {
-        console.error("[AuthContext] onAuthStateChanged: Error from fetchAppUser (should be handled within fetchAppUser):", error);
+        console.error("[AuthContext] onAuthStateChanged: Error from fetchAppUser:", error);
       } finally {
-        console.log("[AuthContext] onAuthStateChanged callback finished. Setting authLoadingInternal to false.");
-        setAuthLoadingInternal(false);
+        console.log("[AuthContext] onAuthStateChanged callback finished. Setting authContextLoading to false.");
+        setAuthContextLoading(false);
       }
     });
 
@@ -100,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fetchAppUser(currentUser);
     } else {
       console.log("[AuthContext] refreshAppUser: No current user. Calling fetchAppUser(null).");
-      await fetchAppUser(null);
+      await fetchAppUser(null); // This will clear appUser and set profile incomplete
     }
   }, [currentUser, fetchAppUser]);
 
@@ -108,8 +105,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
         currentUser,
         appUser,
-        authContextLoading: authLoadingInternal,
-        profileLoading: profileLoadingInternal,
+        authContextLoading,
+        profileLoading,
         isProfileComplete,
         refreshAppUser
     }}>
@@ -125,5 +122,3 @@ export function useAuth() {
   }
   return context;
 }
-
-    
