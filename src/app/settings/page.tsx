@@ -10,26 +10,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Info, PlusCircle, Save, Loader2, UserCircle } from 'lucide-react';
+import { Info, PlusCircle, Save, Loader2, UserCircle, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { auth } from '@/lib/firebase/config';
 import { updateProfile as updateFirebaseAuthProfile } from 'firebase/auth';
 import { updateUserProfileData } from '@/services/userService';
 import type { AppUser } from '@/lib/types';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const DEFAULT_INITIAL_PERIOD = new Date().getFullYear().toString();
-const DEFAULT_AVAILABLE_PERIODS = [
-  (new Date().getFullYear() - 1).toString(),
-  DEFAULT_INITIAL_PERIOD,
-  (new Date().getFullYear() + 1).toString()
-];
 
 export default function SettingsPage() {
-  const { currentUser, appUser, authContextLoading, profileLoading, isProfileComplete, refreshAppUser } = useAuth();
+  const { currentUser, appUser, authContextLoading, profileLoading, isProfileComplete, isUprAssigned, refreshAppUser } = useAuth();
   const router = useRouter();
 
   const [displayNameInput, setDisplayNameInput] = useState('');
-  const [initialPeriodInput, setInitialPeriodInput] = useState(DEFAULT_INITIAL_PERIOD); // Only for initial setup form
+  const [initialPeriodInput, setInitialPeriodInput] = useState(DEFAULT_INITIAL_PERIOD);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const [selectedPeriod, setSelectedPeriod] = useState('');
@@ -38,7 +34,10 @@ export default function SettingsPage() {
   const [isSavingActivePeriod, setIsSavingActivePeriod] = useState(false);
   const [isSavingNewPeriod, setIsSavingNewPeriod] = useState(false);
   const [riskAppetiteInput, setRiskAppetiteInput] = useState<number | string>('');
-  const [assignedUprName, setAssignedUprName] = useState<string | null>(null); // To display assigned UPR name
+  
+  // This state is only for displaying UPR info, not for setting it.
+  const [assignedUprInfo, setAssignedUprInfo] = useState<string | null>(null);
+
 
   const { toast } = useToast();
 
@@ -49,34 +48,30 @@ export default function SettingsPage() {
     }
 
     if (!authContextLoading && currentUser && !profileLoading && appUser) {
+      console.log("[SettingsPage] AppUser data available:", appUser);
       setDisplayNameInput(appUser.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || '');
       setSelectedPeriod(appUser.activePeriod || '');
       setAvailablePeriodsState(appUser.availablePeriods || []);
       setRiskAppetiteInput(appUser.riskAppetite === null || appUser.riskAppetite === undefined ? '' : appUser.riskAppetite);
       
-      // Fetch and display UPR name if uprId exists
       if (appUser.uprId) {
-        // Placeholder: In a real app, you'd fetch UPR details from Firestore
-        // For now, let's assume a function getUprDetails(uprId) exists or use a mock
-        // For this change, we'll just display the ID or a placeholder
-        // In a full implementation, you would fetch the UPR document here.
-        // For example:
-        // getUprDocumentById(appUser.uprId).then(uprDoc => {
-        //   if (uprDoc) setAssignedUprName(uprDoc.name);
-        // });
-        setAssignedUprName(`(ID: ${appUser.uprId})`); // Simple display for now
+        // In a real app, you'd fetch UPR name based on uprId. For now, display ID.
+        setAssignedUprInfo(`Terassign ke UPR dengan ID: ${appUser.uprId}`);
       } else {
-        setAssignedUprName(null);
+        setAssignedUprInfo(null);
       }
 
-      if (!isProfileComplete && !appUser.activePeriod) {
-        setInitialPeriodInput(DEFAULT_INITIAL_PERIOD);
+      // If the profile basics are not complete (e.g. first time setup flow)
+      if (!isProfileComplete) {
+        setInitialPeriodInput(appUser.activePeriod || DEFAULT_INITIAL_PERIOD);
       }
-    } else if (!authContextLoading && currentUser && !profileLoading && !appUser && !isProfileComplete) {
+    } else if (!authContextLoading && currentUser && !profileLoading && !appUser) {
+      // This case is for new user, first time setup where appUser document doesn't exist yet
+      console.log("[SettingsPage] New user or no appUser doc, setting defaults for setup form.");
       setDisplayNameInput(currentUser.displayName || currentUser.email?.split('@')[0] || 'Pengguna Baru');
       setInitialPeriodInput(DEFAULT_INITIAL_PERIOD);
       setRiskAppetiteInput('');
-      setAssignedUprName(null);
+      setAssignedUprInfo(null);
     }
   }, [appUser, currentUser, authContextLoading, profileLoading, isProfileComplete, router]);
 
@@ -93,14 +88,19 @@ export default function SettingsPage() {
       return;
     }
 
-    let periodToSave = initialPeriodInput.trim();
-    if (isProfileComplete) {
-      periodToSave = selectedPeriod || (appUser?.activePeriod || DEFAULT_INITIAL_PERIOD);
-    } else {
-        if (!initialPeriodInput.trim() || !/^\d{4}(?:[-\/](?:S[1-2]|Q[1-4]))?$/.test(initialPeriodInput.trim()) && !/^\d{4}\/\d{4}$/.test(initialPeriodInput.trim())) {
-            toast({ title: "Format Periode Tidak Valid", description: "Format tahun periode awal tidak valid. Gunakan YYYY, YYYY/YYYY atau YYYY-S1/Q1.", variant: "destructive" });
-            return;
-        }
+    let periodToSetActive: string;
+    let periodsToStore: string[];
+
+    if (isProfileComplete) { // Updating existing profile
+      periodToSetActive = selectedPeriod || (appUser?.activePeriod || DEFAULT_INITIAL_PERIOD); // Use current selected or existing active
+      periodsToStore = appUser?.availablePeriods || [periodToSetActive];
+    } else { // Initial profile setup
+      if (!initialPeriodInput.trim() || !/^\d{4}(?:[-\/](?:S[1-2]|Q[1-4]))?$/.test(initialPeriodInput.trim()) && !/^\d{4}\/\d{4}$/.test(initialPeriodInput.trim())) {
+        toast({ title: "Format Periode Tidak Valid", description: "Format tahun periode awal tidak valid. Gunakan YYYY, YYYY/YYYY atau YYYY-S1/Q1.", variant: "destructive" });
+        return;
+      }
+      periodToSetActive = initialPeriodInput.trim();
+      periodsToStore = [periodToSetActive];
     }
 
     let appetiteToSave: number | null = null;
@@ -118,35 +118,34 @@ export default function SettingsPage() {
       if (auth.currentUser && auth.currentUser.displayName !== displayNameInput.trim()) {
         await updateFirebaseAuthProfile(auth.currentUser, { displayName: displayNameInput.trim() });
       }
-
+      
       const profileDataToUpdate: Partial<AppUser> = {
         displayName: displayNameInput.trim(),
         riskAppetite: appetiteToSave,
-        // uprId is NOT set here. It must be assigned by an Admin.
+        activePeriod: periodToSetActive, // Always set/update activePeriod
+        // uprId is NOT set here by the user. It's assigned by Admin.
+        // If appUser.uprId already exists, it will be preserved by updateUserProfileData merge.
       };
 
+      // Only set availablePeriods if it's an initial setup or if it's being managed explicitly
       if (!isProfileComplete) {
-        profileDataToUpdate.activePeriod = periodToSave;
-        profileDataToUpdate.availablePeriods = [periodToSave];
-        // Role is set server-side or defaults. uprId will be null until assigned.
-        profileDataToUpdate.uprId = null; // Explicitly null for new profiles
-      }
-
-      await updateUserProfileData(currentUser.uid, profileDataToUpdate);
-      await refreshAppUser();
-      toast({ title: "Profil Disimpan", description: `Profil ${isProfileComplete ? 'diperbarui' : 'awal berhasil disimpan'}.` });
-      
-      // If profile was incomplete and now it MIGHT be complete (e.g. displayName and period set),
-      // but still needs uprId for userSatker, the redirect to '/' will only happen if isProfileComplete becomes true.
-      // If isProfileComplete remains false (e.g. waiting for uprId assignment), they stay on settings page.
-      if (isProfileComplete && appUser?.uprId) { // Check if UPR ID exists for redirection logic
-        router.push('/');
-      } else if (!isProfileComplete) {
-        // Stay on settings page, message about UPR assignment might be needed
-        if (!appUser?.uprId) {
-             toast({ title: "Info Tambahan", description: "Profil Anda telah disimpan. UPR ID akan di-assign oleh Administrator.", variant: "default", duration: 7000 });
+        profileDataToUpdate.availablePeriods = periodsToStore;
+        // For a brand new user, uprId remains null until admin assignment
+        if (!appUser?.uprId) { // Check if uprId is already there from a previous (incomplete) save
+           profileDataToUpdate.uprId = null;
         }
       }
+      // If profile is complete, availablePeriods are managed by add/remove functions, so don't overwrite here unless intended.
+
+      await updateUserProfileData(currentUser.uid, profileDataToUpdate);
+      await refreshAppUser(); // This will update isProfileComplete and isUprAssigned
+      
+      toast({ title: "Profil Disimpan", description: `Profil ${isProfileComplete ? 'diperbarui' : 'awal berhasil disimpan'}.` });
+      
+      // After saving initial setup, if uprId is still not assigned, user stays on settings,
+      // but isProfileComplete (basics) should now be true.
+      // If profile was already complete, they stay on settings.
+      // AppLayout will handle global navigation if needed based on new context state.
 
     } catch (error: any) {
       console.error(`Error ${isProfileComplete ? 'updating' : 'saving initial'} profile:`, error);
@@ -163,8 +162,8 @@ export default function SettingsPage() {
     try {
       await updateUserProfileData(currentUser.uid, { activePeriod: newPeriodValue });
       await refreshAppUser();
-      setSelectedPeriod(newPeriodValue);
-      toast({ title: "Periode Aktif Diubah", description: `Periode aktif berhasil diatur ke ${newPeriodValue}. Aplikasi akan memuat ulang data terkait.` });
+      setSelectedPeriod(newPeriodValue); // Update local state for immediate UI reflection
+      toast({ title: "Periode Aktif Diubah", description: `Periode aktif berhasil diatur ke ${newPeriodValue}. Data aplikasi akan disesuaikan.` });
     } catch (error: any) {
       console.error("Error updating active period:", error);
       toast({ title: "Gagal Mengubah Periode", description: error.message || "Terjadi kesalahan.", variant: "destructive" });
@@ -204,7 +203,7 @@ export default function SettingsPage() {
 
     try {
       await updateUserProfileData(currentUser.uid, { availablePeriods: updatedPeriods });
-      await refreshAppUser();
+      await refreshAppUser(); // This will update appUser and thus availablePeriodsState via useEffect
       toast({ title: "Periode Ditambahkan", description: `Periode "${trimmedPeriod}" berhasil ditambahkan.` });
       setNewPeriodInput('');
     } catch (error: any) {
@@ -215,7 +214,8 @@ export default function SettingsPage() {
     }
   };
 
-  const pageLoading = authContextLoading || (!authContextLoading && !currentUser) || (!authContextLoading && currentUser && profileLoading);
+  // Determine overall loading state for the page
+  const pageLoading = authContextLoading || (currentUser && profileLoading);
 
   if (pageLoading) {
     return (
@@ -226,7 +226,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser && !authContextLoading) { // Ensure auth loading is finished before redirect
      return (
          <div className="text-center py-10">
             <p className="text-muted-foreground">Sesi tidak valid. Silakan login kembali.</p>
@@ -234,7 +234,8 @@ export default function SettingsPage() {
         </div>
     );
   }
-
+  
+  // If profile basics are not complete (displayName or activePeriod missing)
   if (!isProfileComplete) {
     return (
       <div className="space-y-6">
@@ -245,13 +246,15 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Pengaturan Profil Awal</CardTitle>
-            {!appUser?.uprId && (
-                <CardDescription className="text-orange-600 dark:text-orange-400">
-                    <Info className="inline h-4 w-4 mr-1" />
-                    Anda belum di-assign ke Unit Pemilik Risiko (UPR) oleh Administrator.
-                    Setelah menyimpan profil awal, hubungi Administrator untuk assignment UPR.
-                </CardDescription>
-            )}
+            <CardDescription>
+              Informasi ini diperlukan untuk personalisasi aplikasi.
+              {!isUprAssigned && (
+                <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="inline h-4 w-4 mr-1" />
+                    Unit Pemilik Risiko (UPR) Anda belum di-assign oleh Administrator. Hubungi admin untuk assignment.
+                </span>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleProfileSave} className="space-y-6">
@@ -293,7 +296,7 @@ export default function SettingsPage() {
                   max="25"
                   disabled={isSavingProfile}
                 />
-                <p className="text-xs text-muted-foreground">Batas tertinggi skor risiko yang dapat diterima UPR. Dikosongkan jika belum ditetapkan.</p>
+                <p className="text-xs text-muted-foreground">Batas tertinggi skor risiko yang dapat diterima. Dikosongkan jika belum ditetapkan.</p>
               </div>
               <Button type="submit" disabled={isSavingProfile} className="w-full">
                 {isSavingProfile ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
@@ -306,6 +309,7 @@ export default function SettingsPage() {
     );
   }
 
+  // If profile basics are complete, show full settings page
   return (
     <div className="space-y-6">
       <PageHeader
@@ -334,11 +338,19 @@ export default function SettingsPage() {
             </div>
              <div className="space-y-1.5">
                 <Label>UPR Terkait</Label>
-                <div className="p-2 border rounded-md bg-muted text-sm">
-                    {assignedUprName || (appUser?.uprId ? `ID: ${appUser.uprId}` : <span className="italic text-muted-foreground">Belum di-assign UPR oleh Admin</span>)}
+                <div className="p-3 border rounded-md bg-muted text-sm min-h-[40px] flex items-center">
+                  {isUprAssigned && appUser?.uprId 
+                    ? (assignedUprInfo || `ID UPR: ${appUser.uprId}`) 
+                    : (
+                        <span className="italic text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="inline h-4 w-4 mr-1" />
+                            UPR belum di-assign oleh Administrator. Fungsi aplikasi akan terbatas.
+                        </span>
+                      )
+                  }
                 </div>
                 <p className="text-xs text-muted-foreground flex items-center">
-                    <Info className="w-3 h-3 mr-1 shrink-0" /> UPR di-assign oleh Administrator.
+                    <Info className="w-3 h-3 mr-1 shrink-0" /> UPR di-assign oleh Administrator dan tidak dapat diubah di sini.
                 </p>
             </div>
             <div className="space-y-1.5">
@@ -367,7 +379,7 @@ export default function SettingsPage() {
               <Select
                 value={selectedPeriod}
                 onValueChange={handleActivePeriodChange}
-                disabled={isSavingActivePeriod || availablePeriodsState.length === 0 || !appUser?.uprId}
+                disabled={isSavingActivePeriod || availablePeriodsState.length === 0 || !isUprAssigned}
               >
                 <SelectTrigger id="currentPeriod" className="w-full md:w-[280px]">
                   <SelectValue placeholder="Pilih periode" />
@@ -385,7 +397,7 @@ export default function SettingsPage() {
               {isSavingActivePeriod && <Loader2 className="animate-spin h-5 w-5 text-primary" />}
             </div>
             <p className="text-xs text-muted-foreground">
-              { !appUser?.uprId ? "UPR belum di-assign. Periode aktif tidak dapat diubah." : "Mengubah periode aktif akan mempengaruhi data yang ditampilkan di seluruh aplikasi."}
+              { !isUprAssigned ? "UPR belum di-assign. Periode aktif belum dapat diubah." : "Mengubah periode aktif akan mempengaruhi data yang ditampilkan di seluruh aplikasi."}
             </p>
           </div>
         </CardContent>
@@ -394,7 +406,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Kelola Periode yang Tersedia</CardTitle>
-          <CardDescription>Tambahkan periode pelaporan baru ke sistem (hanya berlaku untuk UPR Anda saat ini).</CardDescription>
+          <CardDescription>Tambahkan periode pelaporan baru ke sistem (berlaku untuk semua UPR yang Anda kelola jika Anda Admin, atau UPR Anda saat ini jika user biasa).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -405,10 +417,10 @@ export default function SettingsPage() {
                 value={newPeriodInput}
                 onChange={(e) => setNewPeriodInput(e.target.value)}
                 placeholder="Masukkan periode baru"
-                disabled={isSavingNewPeriod || !appUser?.uprId}
+                disabled={isSavingNewPeriod || !isUprAssigned}
               />
             </div>
-            <Button onClick={handleAddNewPeriod} type="button" className="w-full sm:w-auto" disabled={isSavingNewPeriod || !appUser?.uprId}>
+            <Button onClick={handleAddNewPeriod} type="button" className="w-full sm:w-auto" disabled={isSavingNewPeriod || !isUprAssigned}>
               {isSavingNewPeriod ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                Tambah Periode
             </Button>
@@ -428,5 +440,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
-    

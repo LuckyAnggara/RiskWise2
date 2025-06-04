@@ -18,10 +18,10 @@ interface NavItem {
   label: string; 
   href: string; 
   icon: React.ElementType;
-  alwaysEnabled?: boolean; // New prop
+  alwaysEnabled?: boolean; 
 }
 
-export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean }) {
+export function SidebarNav({ uprUnassigned }: { uprUnassigned?: boolean }) {
   const pathname = usePathname(); 
   const { openMobile, setOpenMobile } = useSidebar();
   
@@ -34,16 +34,24 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
     { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
     { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
-    { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, // Settings always enabled
+    { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
   ];
   
   const isActive = (navHref: string) => {
     if (navHref === "/") {
       return pathname === "/";
     }
-    if (navHref === "/risk-document") {
-        return pathname === navHref || pathname.startsWith(navHref + "/");
+    // Untuk /risk-document dan /comparative-monitoring, anggap aktif jika path dimulai dengan href tersebut
+    if (navHref === "/risk-document" || navHref === "/comparative-monitoring") {
+        return pathname.startsWith(navHref);
     }
+    // Untuk /all-risks, anggap aktif jika path adalah /all-risks atau /all-risks/manage/*
+    if (navHref === "/all-risks") {
+        return pathname === navHref || pathname.startsWith(navHref + "/manage");
+    }
+    // Untuk /risks/[goalId], /risk-cause-analysis/[riskCauseId], /control-measure-manage/[controlMeasureId]
+    // ini akan ditangani oleh pengecekan `pathname.startsWith(navHref)` yang lebih umum jika
+    // href yang kita bandingkan adalah parent path seperti "/goals" atau "/risk-analysis"
     return pathname.startsWith(navHref);
   };
 
@@ -52,7 +60,8 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
       <SidebarGroup>
         <SidebarGroupLabel>Menu</SidebarGroupLabel>
         {navItems.map((item) => {
-          const isDisabled = profileIncomplete && !item.alwaysEnabled;
+          // Menu item di-disable jika UPR belum di-assign, KECUALI item.alwaysEnabled adalah true (seperti Pengaturan)
+          const isDisabled = uprUnassigned && !item.alwaysEnabled;
           return (
             <SidebarMenuItem key={item.href}>
               <Link href={isDisabled ? "#" : item.href} passHref legacyBehavior={isDisabled ? undefined : false}>
@@ -61,14 +70,12 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
                   isActive={!isDisabled && isActive(item.href)}
                   onClick={() => {
                     if (openMobile && !isDisabled) setOpenMobile(false);
-                    if (isDisabled) {
-                      // console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap.`);
-                    }
                   }}
                   disabled={isDisabled}
                   className={cn(isDisabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-foreground")}
                   aria-disabled={isDisabled}
                   tabIndex={isDisabled ? -1 : undefined}
+                  tooltip={isDisabled ? "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini." : item.label}
                 >
                   <item.icon className="h-5 w-5" />
                   <span>{item.label}</span>
@@ -81,5 +88,3 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     </SidebarMenu>
   );
 }
-
-    
