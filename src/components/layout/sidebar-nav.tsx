@@ -21,7 +21,8 @@ interface NavItem {
   icon: React.ElementType;
   alwaysEnabled?: boolean; 
   adminOnly?: boolean;
-  auditorOnly?: boolean;
+  auditorOnly?: boolean; // Diganti dari auditorOnly ke isAuditorFeature
+  isAuditorFeature?: boolean; // Untuk membedakan menu khusus auditor vs menu umum yang bisa diakses auditor
 }
 
 export function SidebarNav() {
@@ -39,7 +40,7 @@ export function SidebarNav() {
     { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
     { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
     { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
-    { label: "Audit UPR", href: "/audit/select-upr", icon: SearchCheck, auditorOnly: true},
+    { label: "Reviu & Evaluasi Risiko", href: "/reviu/pilih-konteks", icon: SearchCheck, isAuditorFeature: true}, // Diubah dari auditorOnly
     { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
   ];
 
@@ -53,10 +54,11 @@ export function SidebarNav() {
     if (navHref === "/") {
       return pathname === "/";
     }
-    if (["/risk-document", "/comparative-monitoring", "/admin", "/audit"].some(p => navHref.startsWith(p))) {
+    // Untuk path yang lebih dalam, kita perlu memastikan startsWith cocok
+    if (["/risk-document", "/comparative-monitoring", "/admin", "/reviu"].some(p => navHref.startsWith(p))) {
         return pathname.startsWith(navHref);
     }
-    if (navHref === "/all-risks") {
+    if (navHref === "/all-risks") { // Khusus untuk all-risks dan sub-path manage-nya
         return pathname === navHref || pathname.startsWith(navHref + "/manage");
     }
     return pathname.startsWith(navHref);
@@ -67,18 +69,32 @@ export function SidebarNav() {
     let tooltipText = item.label;
 
     if (item.adminOnly && !isAdmin) {
-        isDisabled = true;
-        tooltipText = "Menu ini hanya untuk Administrator.";
-    } else if (item.auditorOnly && !isAuditor) {
-        isDisabled = true; // Sembunyikan saja jika tidak relevan, atau disable jika ingin tetap terlihat
-        return null; // Atau styling disabled
-    } else if (!item.alwaysEnabled && !item.adminOnly && !item.auditorOnly && !isUprAssigned) {
-        // Untuk menu User Satker standar, disable jika UPR belum di-assign dan bukan admin
+      return null; // Admin menu only for admins
+    }
+    
+    if (item.isAuditorFeature && !isAuditor) {
+      return null; // Auditor feature only for auditors
+    }
+
+    // Non-admin, non-auditor feature, non-always-enabled menus are disabled if UPR not assigned
+    if (!item.alwaysEnabled && !item.adminOnly && !item.isAuditorFeature && !isUprAssigned) {
         isDisabled = true;
         tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
     }
     
-    if (item.auditorOnly && !isAuditor) return null; // Sembunyikan menu audit jika bukan auditor
+    // Jika ini adalah menu khusus auditor, dan pengguna bukan auditor, jangan tampilkan.
+    // Jika ini BUKAN menu khusus auditor, TAPI pengguna adalah auditor DAN UPR-nya BELUM di-assign (untuk peran userSatker),
+    // maka menu userSatker standar akan di-disable.
+    // Namun, menu "Reviu & Evaluasi Risiko" (isAuditorFeature) harus selalu enable untuk auditor.
+    if (!item.isAuditorFeature && isAuditor && !isUprAssigned && !item.alwaysEnabled && !item.adminOnly) {
+        // This specific condition handles if an auditor also has userSatker capabilities
+        // but their UPR for userSatker role is not yet assigned.
+        // However, their "Reviu & Evaluasi Risiko" menu should remain enabled.
+        // So, if it's NOT an auditor feature, then disable.
+        isDisabled = true;
+        tooltipText = "UPR untuk peran standar Anda belum di-assign.";
+    }
+
 
     return (
       <SidebarMenuItem key={item.href}>
@@ -107,8 +123,16 @@ export function SidebarNav() {
     <SidebarMenu>
       <SidebarGroup>
         <SidebarGroupLabel>Menu Utama</SidebarGroupLabel>
-        {navItems.filter(item => !item.adminOnly).map(renderNavItem)}
+        {navItems.filter(item => !item.adminOnly && !item.isAuditorFeature).map(renderNavItem)}
       </SidebarGroup>
+      
+      {isAuditor && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Reviu & Evaluasi</SidebarGroupLabel>
+          {navItems.filter(item => item.isAuditorFeature).map(renderNavItem)}
+        </SidebarGroup>
+      )}
+
       {isAdmin && (
         <SidebarGroup>
           <SidebarGroupLabel>Menu Admin</SidebarGroupLabel>
