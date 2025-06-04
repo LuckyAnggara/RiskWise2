@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Label } from '@/components/ui/label'; // Import Label
 import { Loader2, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { getAllUprs } from '@/services/uprService';
