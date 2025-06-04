@@ -10,6 +10,10 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  collection,
+  getDocs,
+  query,
+  orderBy,
   type DocumentReference,
   type DocumentData,
 } from "firebase/firestore";
@@ -42,17 +46,16 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
                         ? data.updatedAt.toDate().toISOString()
                         : (typeof data.updatedAt === 'string' ? data.updatedAt : undefined);
 
-      // Penting: Pastikan data.uprId adalah ID dokumen UPR, bukan nama.
       const uprIdFromFirestore = data.uprId || null;
-      console.log(`[userService] getUserDocument: For UID ${uid}, uprId from Firestore: ${uprIdFromFirestore}, displayName: ${data.displayName}`);
+      console.log(`[userService] getUserDocument: For UID ${uid}, uprId from Firestore: ${uprIdFromFirestore}, displayName: ${data.displayName}, role: ${data.role}`);
 
       return {
-        uid: data.uid || uid, // Use passed uid if data.uid is missing
+        uid: data.uid || uid,
         email: data.email || null,
         displayName: data.displayName || null,
         photoURL: data.photoURL || null,
-        role: data.role || 'userSatker', // Default role
-        uprId: uprIdFromFirestore, // Ini HARUS ID dokumen UPR, bukan nama.
+        role: data.role || 'userSatker',
+        uprId: uprIdFromFirestore,
         activePeriod: data.activePeriod || null,
         availablePeriods: Array.isArray(data.availablePeriods) ? data.availablePeriods : null,
         riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
@@ -71,7 +74,7 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
 
 export async function updateUserProfileData(
   uid: string,
-  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods" | "riskAppetite" | "uprId">>
+  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods" | "riskAppetite" | "uprId" | "role">> // Added role
 ): Promise<void> {
   if (!uid) throw new Error("UID pengguna diperlukan untuk memperbarui profil.");
   console.log(`[userService] updateUserProfileData: Called for UID: ${uid} with data:`, JSON.stringify(data));
@@ -85,15 +88,11 @@ export async function updateUserProfileData(
   if (data.activePeriod !== undefined) updates.activePeriod = data.activePeriod || null;
   if (data.availablePeriods !== undefined) updates.availablePeriods = Array.isArray(data.availablePeriods) ? data.availablePeriods : [];
   if (data.riskAppetite !== undefined) updates.riskAppetite = data.riskAppetite;
-  
-  // Penting: `uprId` di sini seharusnya ID DOKUMEN UPR, bukan nama.
-  // Pastikan data yang dikirim ke fungsi ini untuk `uprId` adalah ID yang benar.
-  // Fungsi ini tidak akan lagi mencoba menyamakan `uprId` dengan `displayName`.
   if (data.uprId !== undefined) {
-    updates.uprId = data.uprId; // Terima uprId apa adanya (harus ID dokumen).
-    console.log(`[userService] updateUserProfileData: uprId to be saved/updated: ${data.uprId} (this should be a document ID)`);
+    updates.uprId = data.uprId; 
+    console.log(`[userService] updateUserProfileData: uprId to be saved/updated: ${data.uprId}`);
   }
-
+  if (data.role !== undefined) updates.role = data.role; // Update role if provided
 
   try {
     const docSnap = await getDoc(userDocRef);
@@ -114,9 +113,9 @@ export async function updateUserProfileData(
       const createData: AppUser = {
         uid,
         email: userEmail,
-        role: 'userSatker',
+        role: data.role || 'userSatker', // Default role if not specified
         displayName: data.displayName || "Pengguna Baru",
-        uprId: data.uprId || null, // uprId akan null sampai di-assign admin.
+        uprId: data.uprId || null,
         photoURL: data.photoURL || null,
         activePeriod: data.activePeriod || DEFAULT_INITIAL_PERIOD,
         availablePeriods: data.availablePeriods && data.availablePeriods.length > 0 ? data.availablePeriods : [...DEFAULT_AVAILABLE_PERIODS],
@@ -136,3 +135,41 @@ export async function updateUserProfileData(
     throw new Error(`Gagal memperbarui/membuat data profil pengguna: ${errorMessage}`);
   }
 }
+
+export async function getAllAppUsers(): Promise<AppUser[]> {
+  try {
+    const usersCollectionRef = collection(db, USERS_COLLECTION);
+    const q = query(usersCollectionRef, orderBy("displayName", "asc")); // Order by displayName for example
+    const querySnapshot = await getDocs(q);
+    const users: AppUser[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const createdAt = data.createdAt instanceof Timestamp
+                        ? data.createdAt.toDate().toISOString()
+                        : (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
+      const updatedAt = data.updatedAt instanceof Timestamp
+                        ? data.updatedAt.toDate().toISOString()
+                        : (typeof data.updatedAt === 'string' ? data.updatedAt : undefined);
+      
+      users.push({
+        uid: docSnap.id,
+        email: data.email || null,
+        displayName: data.displayName || null,
+        photoURL: data.photoURL || null,
+        role: data.role || 'userSatker',
+        uprId: data.uprId || null,
+        activePeriod: data.activePeriod || null,
+        availablePeriods: data.availablePeriods || [],
+        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
+        createdAt,
+        updatedAt,
+      } as AppUser);
+    });
+    return users;
+  } catch (error: any) {
+    console.error("[userService] Error getting all app users: ", error.message || String(error));
+    throw new Error(`Gagal mengambil daftar pengguna. Pesan: ${error.message || String(error)}`);
+  }
+}
+
+    

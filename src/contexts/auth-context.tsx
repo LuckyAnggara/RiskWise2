@@ -6,15 +6,16 @@ import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
 import { Loader2 } from 'lucide-react';
 import { getUserDocument } from '@/services/userService';
-import type { AppUser } from '@/lib/types';
+import type { AppUser, UserRole } from '@/lib/types'; // UserRole diimpor
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   appUser: AppUser | null;
   authContextLoading: boolean;
   profileLoading: boolean;
-  isProfileComplete: boolean; // True if displayName & activePeriod are set
-  isUprAssigned: boolean;    // True if uprId is assigned
+  isProfileComplete: boolean; // Basics: displayName, activePeriod, availablePeriods
+  isUprAssigned: boolean;    // UPR ID is assigned
+  isAdmin: boolean; // New: For admin role
   refreshAppUser: () => Promise<void>;
 }
 
@@ -27,11 +28,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoadingInternal, setProfileLoadingInternal] = useState(true);
   const [isProfileCompleteInternal, setIsProfileCompleteInternal] = useState(false);
   const [isUprAssignedInternal, setIsUprAssignedInternal] = useState(false);
+  const [isAdminInternal, setIsAdminInternal] = useState(false); // New admin state
 
   const fetchAppUser = useCallback(async (user: FirebaseUser | null) => {
     console.log("[AuthContext] fetchAppUser: Called with Firebase user:", user ? user.uid : "null");
     if (user) {
-      console.log("[AuthContext] fetchAppUser: Setting profileLoadingInternal to true for UID:", user.uid);
       setProfileLoadingInternal(true);
       try {
         const userDoc = await getUserDocument(user.uid);
@@ -48,13 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           const uprIsAssigned = !!(userDoc.uprId && typeof userDoc.uprId === 'string' && userDoc.uprId.trim() !== '');
           setIsUprAssignedInternal(uprIsAssigned);
+          setIsAdminInternal(userDoc.role === 'admin'); // Set admin state
 
-          console.log(`[AuthContext] fetchAppUser: UID ${user.uid}. BasicsComplete: ${profileBasicsComplete}, UprAssigned: ${uprIsAssigned}. DisplayName: ${userDoc.displayName}, ActivePeriod: ${userDoc.activePeriod}, UPR ID: ${userDoc.uprId}`);
+          console.log(`[AuthContext] fetchAppUser: UID ${user.uid}. BasicsComplete: ${profileBasicsComplete}, UprAssigned: ${uprIsAssigned}, IsAdmin: ${userDoc.role === 'admin'}. UPR ID (from Firestore): ${userDoc.uprId}`);
         } else {
           setAppUser(null);
           setIsProfileCompleteInternal(false);
           setIsUprAssignedInternal(false);
-          console.log("[AuthContext] fetchAppUser: No Firestore doc (appUser is null), profile set to incomplete/unassigned for UID:", user.uid);
+          setIsAdminInternal(false);
+          console.log("[AuthContext] fetchAppUser: No Firestore doc, profile set to incomplete/unassigned/not-admin for UID:", user.uid);
         }
       } catch (error: any) {
         const errorMessage = error.message || String(error);
@@ -62,47 +65,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAppUser(null);
         setIsProfileCompleteInternal(false);
         setIsUprAssignedInternal(false);
+        setIsAdminInternal(false);
       } finally {
-        console.log("[AuthContext] fetchAppUser: Setting profileLoadingInternal to false for UID:", user ? user.uid : "null");
         setProfileLoadingInternal(false);
       }
     } else {
-      console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states. Setting profileLoadingInternal to false.");
       setAppUser(null);
       setIsProfileCompleteInternal(false);
       setIsUprAssignedInternal(false);
+      setIsAdminInternal(false);
       setProfileLoadingInternal(false);
     }
   }, []);
 
   useEffect(() => {
-    console.log("[AuthContext] onAuthStateChanged listener attaching.");
     setAuthContextLoadingInternal(true);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log("[AuthContext] onAuthStateChanged: Firebase user state changed. New user:", user ? user.uid : "null");
       setCurrentUser(user);
       try {
         await fetchAppUser(user);
       } catch (error) {
-        console.error("[AuthContext] onAuthStateChanged: Error from fetchAppUser during auth state change:", error);
+        console.error("[AuthContext] onAuthStateChanged: Error from fetchAppUser:", error);
       } finally {
-        console.log("[AuthContext] onAuthStateChanged callback finished. Setting authLoadingInternal to false.");
         setAuthContextLoadingInternal(false);
       }
     });
-
-    return () => {
-      console.log("[AuthContext] onAuthStateChanged listener detaching.");
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [fetchAppUser]);
 
   const refreshAppUser = useCallback(async () => {
     if (currentUser) {
-      console.log(`[AuthContext] refreshAppUser called for UID: ${currentUser.uid}. Triggering fetchAppUser.`);
       await fetchAppUser(currentUser);
     } else {
-      console.log("[AuthContext] refreshAppUser: No current Firebase user. Calling fetchAppUser(null).");
       await fetchAppUser(null); 
     }
   }, [currentUser, fetchAppUser]);
@@ -115,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileLoading: profileLoadingInternal,
         isProfileComplete: isProfileCompleteInternal,
         isUprAssigned: isUprAssignedInternal,
+        isAdmin: isAdminInternal, // Provide admin state
         refreshAppUser
     }}>
       {children}
@@ -129,3 +124,5 @@ export function useAuth() {
   }
   return context;
 }
+
+    

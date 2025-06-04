@@ -113,20 +113,19 @@ export interface UPR {
   id: string; // Firestore document ID
   name: string; // e.g., "Inspektorat Jenderal Kementerian X"
   code: string; // e.g., "ITJEN"
-  description?: string;
-  adminUserIds: string[]; // Firebase UIDs of users who can administer this UPR
-  memberUserIds: string[]; // Firebase UIDs of users who are members of this UPR
+  description?: string | null;
   createdAt: string;
   updatedAt?: string;
+  // adminUserIds and memberUserIds are removed as user assignment will be on AppUser.uprId
 }
 
 export interface Goal {
   id: string;
-  uprId: string; // ID of the UPR (from UPRs collection) this goal belongs to
+  uprId: string;
   name: string;
   description: string;
   code: string;
-  userId: string; // UID of the user who created/last modified this
+  userId: string;
   period: string;
   createdAt: string;
   updatedAt?: string;
@@ -134,7 +133,7 @@ export interface Goal {
 
 export interface PotentialRisk {
   id: string;
-  uprId: string; // ID of the UPR (from UPRs collection)
+  uprId: string;
   goalId: string;
   userId: string;
   period: string;
@@ -148,7 +147,7 @@ export interface PotentialRisk {
 
 export interface RiskCause {
   id: string;
-  uprId: string; // ID of the UPR (from UPRs collection)
+  uprId: string;
   potentialRiskId: string;
   goalId: string;
   userId: string;
@@ -168,7 +167,7 @@ export interface RiskCause {
 
 export interface ControlMeasure {
   id: string;
-  uprId: string; // ID of the UPR (from UPRs collection)
+  uprId: string;
   riskCauseId: string;
   potentialRiskId: string;
   goalId: string;
@@ -187,15 +186,16 @@ export interface ControlMeasure {
 }
 
 
-export type UserRole = 'admin' | 'auditor' | 'userSatker';
+export const USER_ROLES = ['admin', 'auditor', 'userSatker'] as const;
+export type UserRole = typeof USER_ROLES[number];
 
 export interface AppUser {
-  uid: string; // Firebase Auth UID
+  uid: string;
   email: string | null;
-  displayName: string | null; // User's preferred display name
+  displayName: string | null;
   photoURL: string | null;
   role: UserRole;
-  uprId: string | null; // ID of the UPR (from UPRs collection) this user is currently associated with
+  uprId: string | null;
   activePeriod: string | null;
   availablePeriods: string[] | null;
   riskAppetite?: number | null;
@@ -218,9 +218,9 @@ export type MonitoringSessionStatus = 'Direncanakan' | 'Aktif' | 'Selesai';
 
 export interface MonitoringSession {
   id: string;
-  uprId: string; // UPR ID context for this session
-  userId: string; // User who created the session
-  period: string; // Application period when the session was created/is relevant for
+  uprId: string;
+  userId: string;
+  period: string;
   name: string;
   startDate: string;
   endDate: string;
@@ -232,11 +232,11 @@ export interface MonitoringSession {
 
 export interface RiskExposure {
   id: string;
-  uprId: string; // UPR ID
+  uprId: string;
   monitoringSessionId: string;
   riskCauseId: string;
-  userId: string; // User who recorded this exposure
-  period: string; // Application period
+  userId: string;
+  period: string;
   exposureValue: number | null;
   exposureNotes: string | null;
   isToleranceNegative?: boolean | null;
@@ -254,12 +254,12 @@ export interface MonitoredRiskCauseView extends RiskCause {
 
 export interface MonitoredControlMeasureData {
   id: string;
-  uprId: string; // UPR ID
+  uprId: string;
   monitoringSessionId: string;
   riskCauseId: string;
   controlMeasureId: string;
-  userId: string; // User who recorded this data
-  period: string; // Application period
+  userId: string;
+  period: string;
   realizationKCI: string | null;
   isTargetNegative: boolean | null;
   controlPerformance: number | null;

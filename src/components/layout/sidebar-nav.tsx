@@ -3,7 +3,7 @@
 
 import Link from 'next/link'; 
 import { usePathname } from "next/navigation"; 
-import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, Edit, ShieldCheck, FileText, Activity, Columns, FileArchive } from "lucide-react"; 
+import { LayoutDashboard, Target, ListChecks, Cog, BarChart3, ShieldCheck, FileText, Activity, Columns, FileArchive, Users, Briefcase, Shield } from "lucide-react"; 
 import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
@@ -13,20 +13,23 @@ import {
   SidebarGroupLabel,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useAuth } from '@/contexts/auth-context'; // Import useAuth
 
 interface NavItem {
   label: string; 
   href: string; 
   icon: React.ElementType;
   alwaysEnabled?: boolean; 
+  adminOnly?: boolean;
 }
 
-export function SidebarNav({ uprUnassigned }: { uprUnassigned?: boolean }) {
+export function SidebarNav() { // Removed uprUnassigned prop
   const pathname = usePathname(); 
   const { openMobile, setOpenMobile } = useSidebar();
-  
+  const { isUprAssigned, isAdmin } = useAuth(); // Get isUprAssigned and isAdmin from context
+
   const navItems: NavItem[] = [
-    { label: "Dashboard", href: "/", icon: LayoutDashboard },
+    { label: "Dasbor", href: "/", icon: LayoutDashboard },
     { label: "Sasaran", href: "/goals", icon: Target },
     { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText }, 
     { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3 }, 
@@ -36,55 +39,77 @@ export function SidebarNav({ uprUnassigned }: { uprUnassigned?: boolean }) {
     { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
     { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, 
   ];
+
+  const adminNavItems: NavItem[] = [
+    { label: "Admin Dashboard", href: "/admin", icon: Shield, adminOnly: true },
+    { label: "Manajemen UPR", href: "/admin/uprs", icon: Briefcase, adminOnly: true },
+    { label: "Manajemen Pengguna", href: "/admin/users", icon: Users, adminOnly: true },
+  ];
   
   const isActive = (navHref: string) => {
     if (navHref === "/") {
       return pathname === "/";
     }
-    // Untuk /risk-document dan /comparative-monitoring, anggap aktif jika path dimulai dengan href tersebut
-    if (navHref === "/risk-document" || navHref === "/comparative-monitoring") {
+    if (["/risk-document", "/comparative-monitoring", "/admin"].some(p => navHref.startsWith(p))) {
         return pathname.startsWith(navHref);
     }
-    // Untuk /all-risks, anggap aktif jika path adalah /all-risks atau /all-risks/manage/*
     if (navHref === "/all-risks") {
         return pathname === navHref || pathname.startsWith(navHref + "/manage");
     }
-    // Untuk /risks/[goalId], /risk-cause-analysis/[riskCauseId], /control-measure-manage/[controlMeasureId]
-    // ini akan ditangani oleh pengecekan `pathname.startsWith(navHref)` yang lebih umum jika
-    // href yang kita bandingkan adalah parent path seperti "/goals" atau "/risk-analysis"
     return pathname.startsWith(navHref);
+  };
+
+  const renderNavItem = (item: NavItem) => {
+    const isDisabled = !item.alwaysEnabled && (
+      (item.adminOnly && !isAdmin) || (!item.adminOnly && !isAdmin && !isUprAssigned)
+    );
+    
+    let tooltipText = item.label;
+    if (isDisabled) {
+        if (item.adminOnly && !isAdmin) {
+            tooltipText = "Menu ini hanya untuk Administrator.";
+        } else if (!item.adminOnly && !isAdmin && !isUprAssigned) {
+            tooltipText = "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini.";
+        }
+    }
+
+    return (
+      <SidebarMenuItem key={item.href}>
+        <Link href={isDisabled ? "#" : item.href} passHref legacyBehavior={isDisabled ? undefined : false}>
+          <SidebarMenuButton
+            as={isDisabled ? "button" : "a"}
+            isActive={!isDisabled && isActive(item.href)}
+            onClick={() => {
+              if (openMobile && !isDisabled) setOpenMobile(false);
+            }}
+            disabled={isDisabled}
+            className={cn(isDisabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-foreground")}
+            aria-disabled={isDisabled}
+            tabIndex={isDisabled ? -1 : undefined}
+            tooltip={tooltipText}
+          >
+            <item.icon className="h-5 w-5" />
+            <span>{item.label}</span>
+          </SidebarMenuButton>
+        </Link>
+      </SidebarMenuItem>
+    );
   };
 
   return (
     <SidebarMenu>
       <SidebarGroup>
-        <SidebarGroupLabel>Menu</SidebarGroupLabel>
-        {navItems.map((item) => {
-          // Menu item di-disable jika UPR belum di-assign, KECUALI item.alwaysEnabled adalah true (seperti Pengaturan)
-          const isDisabled = uprUnassigned && !item.alwaysEnabled;
-          return (
-            <SidebarMenuItem key={item.href}>
-              <Link href={isDisabled ? "#" : item.href} passHref legacyBehavior={isDisabled ? undefined : false}>
-                <SidebarMenuButton
-                  as={isDisabled ? "button" : "a"}
-                  isActive={!isDisabled && isActive(item.href)}
-                  onClick={() => {
-                    if (openMobile && !isDisabled) setOpenMobile(false);
-                  }}
-                  disabled={isDisabled}
-                  className={cn(isDisabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-foreground")}
-                  aria-disabled={isDisabled}
-                  tabIndex={isDisabled ? -1 : undefined}
-                  tooltip={isDisabled ? "Lengkapi assignment UPR di Pengaturan untuk mengakses menu ini." : item.label}
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span>{item.label}</span>
-                </SidebarMenuButton>
-              </Link>
-            </SidebarMenuItem>
-          );
-        })}
+        <SidebarGroupLabel>Menu Pengguna</SidebarGroupLabel>
+        {navItems.map(renderNavItem)}
       </SidebarGroup>
+      {isAdmin && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Menu Admin</SidebarGroupLabel>
+          {adminNavItems.map(renderNavItem)}
+        </SidebarGroup>
+      )}
     </SidebarMenu>
   );
 }
+
+    
