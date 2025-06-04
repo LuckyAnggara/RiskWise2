@@ -26,6 +26,10 @@ const uprFormSchema = z.object({
   name: z.string().min(3, "Nama UPR minimal 3 karakter."),
   code: z.string().min(2, "Kode UPR minimal 2 karakter.").max(10, "Kode UPR maksimal 10 karakter.").regex(/^[A-Z0-9_]+$/, "Kode UPR hanya boleh huruf kapital, angka, dan underscore."),
   description: z.string().optional().nullable(),
+  riskAppetite: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? null : Number(String(val).replace(/[^0-9]/g, ''))),
+    z.number().min(1, "Selera risiko minimal 1.").max(25, "Selera risiko maksimal 25.").nullable().optional()
+  ),
 });
 
 type UprFormData = z.infer<typeof uprFormSchema>;
@@ -50,10 +54,11 @@ export default function ManageSingleUprPage() {
     register,
     handleSubmit,
     reset,
+    control, // For potential Controller usage if needed
     formState: { errors, isSubmitting },
   } = useForm<UprFormData>({
     resolver: zodResolver(uprFormSchema),
-    defaultValues: { name: "", code: "", description: "" },
+    defaultValues: { name: "", code: "", description: "", riskAppetite: null },
   });
 
   const fetchUsersAndUpr = useCallback(async () => {
@@ -70,6 +75,7 @@ export default function ManageSingleUprPage() {
             name: uprData.name,
             code: uprData.code,
             description: uprData.description || "",
+            riskAppetite: uprData.riskAppetite === undefined ? null : uprData.riskAppetite,
           });
           
           const assignedUsers = new Set<string>();
@@ -115,20 +121,19 @@ export default function ManageSingleUprPage() {
   const onSubmit: SubmitHandler<UprFormData> = async (data) => {
     let currentUprId = uprIdParam;
     try {
+      const uprPayload = {
+        name: data.name,
+        code: data.code,
+        description: data.description || null,
+        riskAppetite: data.riskAppetite === null || isNaN(Number(data.riskAppetite)) ? null : Number(data.riskAppetite),
+      };
+
       if (isCreatingNew) {
-        const newUpr = await addUpr({
-          name: data.name,
-          code: data.code,
-          description: data.description || null,
-        });
+        const newUpr = await addUpr(uprPayload);
         currentUprId = newUpr.id; 
         toast({ title: "UPR Dibuat", description: `UPR "${data.name}" telah berhasil dibuat.` });
       } else {
-        await updateUpr(uprIdParam, {
-          name: data.name,
-          code: data.code,
-          description: data.description || null,
-        });
+        await updateUpr(uprIdParam, uprPayload);
         toast({ title: "UPR Diperbarui", description: `UPR "${data.name}" telah berhasil diperbarui.` });
       }
 
@@ -138,11 +143,9 @@ export default function ManageSingleUprPage() {
         const currentUprAssignment = user.uprId;
 
         if (isSelected && currentUprAssignment !== currentUprId) {
-          
           await updateUserProfileData(user.uid, { uprId: currentUprId });
           toast({ title: "Pengguna Di-assign", description: `Pengguna ${user.displayName || user.email} di-assign ke UPR ${data.name}.`, duration: 2000 });
         } else if (!isSelected && currentUprAssignment === currentUprId) {
-          
           await updateUserProfileData(user.uid, { uprId: null });
            toast({ title: "Pengguna Di-unassign", description: `Pengguna ${user.displayName || user.email} di-unassign dari UPR ${data.name}.`, variant: "default", duration: 2000 });
         }
@@ -182,7 +185,7 @@ export default function ManageSingleUprPage() {
     <div className="space-y-6">
       <PageHeader
         title={isCreatingNew ? "Tambah UPR Baru" : "Edit UPR"}
-        description={isCreatingNew ? "Buat Unit Pemilik Risiko baru." : "Perbarui detail UPR dan kelola pengguna yang terhubung."}
+        description={isCreatingNew ? "Buat Unit Pemilik Risiko baru." : "Perbarui detail UPR, kelola selera risiko, dan pengguna yang terhubung."}
         actions={
             <Button onClick={() => router.push('/admin/uprs')} variant="outline">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Kembali ke Daftar UPR
@@ -195,28 +198,30 @@ export default function ManageSingleUprPage() {
             <CardTitle>Detail UPR</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-1.5">
-              <Label htmlFor="code">Kode UPR</Label>
-              <Input
-                id="code"
-                {...register("code")}
-                placeholder="Contoh: ITJEN, DITKEU"
-                className={errors.code ? "border-destructive" : ""}
-                disabled={isSubmitting}
-              />
-              {errors.code && <p className="text-xs text-destructive mt-1">{errors.code.message}</p>}
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <Label htmlFor="code">Kode UPR</Label>
+                <Input
+                  id="code"
+                  {...register("code")}
+                  placeholder="Contoh: ITJEN, DITKEU"
+                  className={errors.code ? "border-destructive" : ""}
+                  disabled={isSubmitting}
+                />
+                {errors.code && <p className="text-xs text-destructive mt-1">{errors.code.message}</p>}
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="name">Nama UPR</Label>
-              <Input
-                id="name"
-                {...register("name")}
-                placeholder="Contoh: Inspektorat Jenderal, Direktorat Keuangan"
-                className={errors.name ? "border-destructive" : ""}
-                disabled={isSubmitting}
-              />
-              {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
+              <div className="space-y-1.5">
+                <Label htmlFor="name">Nama UPR</Label>
+                <Input
+                  id="name"
+                  {...register("name")}
+                  placeholder="Contoh: Inspektorat Jenderal"
+                  className={errors.name ? "border-destructive" : ""}
+                  disabled={isSubmitting}
+                />
+                {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -229,6 +234,21 @@ export default function ManageSingleUprPage() {
                 disabled={isSubmitting}
               />
             </div>
+             <div className="space-y-1.5">
+                <Label htmlFor="riskAppetite">Selera Risiko UPR (1-25, Opsional)</Label>
+                <Input
+                  id="riskAppetite"
+                  type="number"
+                  {...register("riskAppetite")}
+                  placeholder="Angka 1-25 (contoh: 15 untuk Moderat)"
+                  min="1"
+                  max="25"
+                  className={errors.riskAppetite ? "border-destructive" : ""}
+                  disabled={isSubmitting}
+                />
+                {errors.riskAppetite && <p className="text-xs text-destructive mt-1">{errors.riskAppetite.message}</p>}
+                <p className="text-xs text-muted-foreground">Tingkat risiko tertinggi yang dapat diterima oleh UPR. Kosongkan jika tidak ditetapkan.</p>
+              </div>
           </CardContent>
         </Card>
         

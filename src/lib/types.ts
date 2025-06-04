@@ -110,13 +110,13 @@ export type ControlMeasureTypeKey = keyof typeof CONTROL_MEASURE_TYPES;
 export const CONTROL_MEASURE_TYPE_KEYS = Object.keys(CONTROL_MEASURE_TYPES) as ControlMeasureTypeKey[];
 
 export interface UPR {
-  id: string; // Firestore document ID
-  name: string; // e.g., "Inspektorat Jenderal Kementerian X"
-  code: string; // e.g., "ITJEN"
+  id: string; 
+  name: string; 
+  code: string; 
   description?: string | null;
+  riskAppetite?: number | null; // Selera Risiko (1-25) ditambahkan di sini
   createdAt: string;
   updatedAt?: string;
-  // adminUserIds and memberUserIds are removed as user assignment will be on AppUser.uprId
 }
 
 export interface Goal {
@@ -195,10 +195,10 @@ export interface AppUser {
   displayName: string | null;
   photoURL: string | null;
   role: UserRole;
-  uprId: string | null;
+  uprId: string | null; // Ini adalah ID dari collection 'uprs'
   activePeriod: string | null;
   availablePeriods: string[] | null;
-  riskAppetite?: number | null;
+  // riskAppetite dihapus dari sini
   monitoringSettings?: {
     defaultFrequency?: MonitoringPeriodFrequency | null;
   } | null;

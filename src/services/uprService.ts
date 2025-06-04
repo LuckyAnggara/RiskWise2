@@ -18,9 +18,8 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { UPRS_COLLECTION, GOALS_COLLECTION, POTENTIAL_RISKS_COLLECTION, RISK_CAUSES_COLLECTION, CONTROL_MEASURES_COLLECTION, MONITORING_SESSIONS_COLLECTION, RISK_EXPOSURES_COLLECTION, MONITORED_CONTROL_MEASURES_DATA_COLLECTION } from './collectionNames';
-import { deleteGoal } from './goalService'; // Untuk cascade delete
+import { deleteGoal } from './goalService'; 
 
-// Fungsi untuk mendapatkan UPR berdasarkan ID
 export async function getUprById(uprId: string): Promise<UPR | null> {
   if (!uprId) {
     console.warn("[uprService] getUprById: uprId is missing.");
@@ -38,6 +37,7 @@ export async function getUprById(uprId: string): Promise<UPR | null> {
         name: data.name,
         code: data.code,
         description: data.description || null,
+        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
         createdAt,
         updatedAt
       } as UPR;
@@ -60,11 +60,12 @@ export async function addUpr(
     const docDataToSave = {
       ...data,
       description: data.description || null,
+      riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
     const docRef = await addDoc(collection(db, UPRS_COLLECTION), docDataToSave);
-    const newDocSnap = await getDoc(docRef); // Get the actual document to retrieve server-generated timestamps
+    const newDocSnap = await getDoc(docRef); 
     if (!newDocSnap.exists()) {
         throw new Error("Gagal mengambil dokumen UPR yang baru dibuat.");
     }
@@ -76,6 +77,7 @@ export async function addUpr(
       id: docRef.id,
       ...data,
       description: data.description || null,
+      riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
       createdAt: createdAtTimestamp.toISOString(),
       updatedAt: updatedAtTimestamp.toISOString(),
     };
@@ -100,6 +102,7 @@ export async function getAllUprs(): Promise<UPR[]> {
         name: data.name,
         code: data.code,
         description: data.description || null,
+        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
         createdAt,
         updatedAt
       } as UPR);
@@ -121,11 +124,15 @@ export async function updateUpr(
   }
   try {
     const docRef = doc(db, UPRS_COLLECTION, uprId);
-    await updateDoc(docRef, {
-      ...data,
-      description: data.description === undefined ? undefined : (data.description || null),
-      updatedAt: serverTimestamp(),
-    });
+    const updateData: any = { ...data, updatedAt: serverTimestamp() };
+    if (data.description !== undefined) {
+      updateData.description = data.description || null;
+    }
+    if (data.riskAppetite !== undefined) {
+      updateData.riskAppetite = data.riskAppetite === null ? null : Number(data.riskAppetite);
+    }
+
+    await updateDoc(docRef, updateData);
   } catch (error: any) {
     const errorMessage = error.message || String(error);
     console.error(`[uprService] Error updating UPR ${uprId}: `, errorMessage);
@@ -139,33 +146,15 @@ export async function deleteUpr(uprId: string): Promise<void> {
   }
   const batch = writeBatch(db);
   try {
-    // Delete UPR document
     const uprRef = doc(db, UPRS_COLLECTION, uprId);
     batch.delete(uprRef);
 
-    // Delete related data (Goals, PotentialRisks, RiskCauses, ControlMeasures, MonitoringSessions, RiskExposures, MonitoredControlMeasuresData)
-    // This requires querying each collection for documents with the matching uprId and adding their deletion to the batch.
-    // For brevity, only Goal deletion is shown here. Similar logic would apply to others.
     const goalsQuery = query(collection(db, GOALS_COLLECTION), where("uprId", "==", uprId));
     const goalsSnapshot = await getDocs(goalsQuery);
     for (const goalDoc of goalsSnapshot.docs) {
-      // Assuming deleteGoal handles its own sub-collections like PotentialRisks
-      // If deleteGoal directly uses batch, pass it. Otherwise, call deleteGoal which commits its own batch.
-      // For a single, large atomic operation, all sub-deletes should ideally accept a batch.
-      // For now, we'll call deleteGoal which will perform its own cascade. This is less atomic but simpler to implement here.
-      // To make it fully atomic, deleteGoal and sub-deletes must accept a batch.
-      await deleteGoal(goalDoc.id, uprId, goalDoc.data().period); // Period needs to be known
+      await deleteGoal(goalDoc.id, uprId, goalDoc.data().period); 
     }
     
-    // TODO: Add similar logic for deleting PRs, RCs, CMs, Monitoring Sessions, etc., or ensure their respective deleteByParentID functions accept a batch.
-    // Example for PotentialRisks (conceptual, needs service implementation)
-    // const prQuery = query(collection(db, POTENTIAL_RISKS_COLLECTION), where("uprId", "==", uprId));
-    // const prSnapshot = await getDocs(prQuery);
-    // for (const prDoc of prSnapshot.docs) {
-    //   await deletePotentialRiskAndSubCollections(prDoc.id, uprId, prDoc.data().period, batch);
-    // }
-    // And so on for other collections...
-
     await batch.commit();
   } catch (error: any) {
     const errorMessage = error.message || String(error);

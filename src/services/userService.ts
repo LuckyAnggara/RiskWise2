@@ -58,7 +58,7 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
         uprId: uprIdFromFirestore,
         activePeriod: data.activePeriod || null,
         availablePeriods: Array.isArray(data.availablePeriods) ? data.availablePeriods : null,
-        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
+        // riskAppetite is removed from here
         createdAt,
         updatedAt,
       } as AppUser;
@@ -74,25 +74,24 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
 
 export async function updateUserProfileData(
   uid: string,
-  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods" | "riskAppetite" | "uprId" | "role">> // Added role
+  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods" | "uprId" | "role">> 
 ): Promise<void> {
   if (!uid) throw new Error("UID pengguna diperlukan untuk memperbarui profil.");
   console.log(`[userService] updateUserProfileData: Called for UID: ${uid} with data:`, JSON.stringify(data));
 
   const userDocRef = doc(db, USERS_COLLECTION, uid);
-  const updates: Partial<AppUser> & { updatedAt?: any, createdAt?: any } = {};
+  const updates: Partial<Omit<AppUser, 'riskAppetite'>> & { updatedAt?: any, createdAt?: any } = {}; // Omit riskAppetite
   let isCreatingNewDocument = false;
 
   if (data.displayName !== undefined) updates.displayName = data.displayName || null;
   if (data.photoURL !== undefined) updates.photoURL = data.photoURL || null;
   if (data.activePeriod !== undefined) updates.activePeriod = data.activePeriod || null;
   if (data.availablePeriods !== undefined) updates.availablePeriods = Array.isArray(data.availablePeriods) ? data.availablePeriods : [];
-  if (data.riskAppetite !== undefined) updates.riskAppetite = data.riskAppetite;
   if (data.uprId !== undefined) {
     updates.uprId = data.uprId; 
     console.log(`[userService] updateUserProfileData: uprId to be saved/updated: ${data.uprId}`);
   }
-  if (data.role !== undefined) updates.role = data.role; // Update role if provided
+  if (data.role !== undefined) updates.role = data.role;
 
   try {
     const docSnap = await getDoc(userDocRef);
@@ -110,16 +109,15 @@ export async function updateUserProfileData(
       const authUser = (await import('firebase/auth')).getAuth().currentUser;
       const userEmail = authUser?.email || null;
 
-      const createData: AppUser = {
+      const createData: Omit<AppUser, 'riskAppetite'> = { // Omit riskAppetite
         uid,
         email: userEmail,
-        role: data.role || 'userSatker', // Default role if not specified
+        role: data.role || 'userSatker',
         displayName: data.displayName || "Pengguna Baru",
         uprId: data.uprId || null,
         photoURL: data.photoURL || null,
         activePeriod: data.activePeriod || DEFAULT_INITIAL_PERIOD,
         availablePeriods: data.availablePeriods && data.availablePeriods.length > 0 ? data.availablePeriods : [...DEFAULT_AVAILABLE_PERIODS],
-        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
         createdAt: new Date().toISOString(),
       };
       
@@ -139,7 +137,7 @@ export async function updateUserProfileData(
 export async function getAllAppUsers(): Promise<AppUser[]> {
   try {
     const usersCollectionRef = collection(db, USERS_COLLECTION);
-    const q = query(usersCollectionRef, orderBy("displayName", "asc")); // Order by displayName for example
+    const q = query(usersCollectionRef, orderBy("displayName", "asc"));
     const querySnapshot = await getDocs(q);
     const users: AppUser[] = [];
     querySnapshot.forEach((docSnap) => {
@@ -160,7 +158,7 @@ export async function getAllAppUsers(): Promise<AppUser[]> {
         uprId: data.uprId || null,
         activePeriod: data.activePeriod || null,
         availablePeriods: data.availablePeriods || [],
-        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
+        // riskAppetite is removed
         createdAt,
         updatedAt,
       } as AppUser);

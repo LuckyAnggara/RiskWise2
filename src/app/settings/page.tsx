@@ -33,9 +33,7 @@ export default function SettingsPage() {
   const [newPeriodInput, setNewPeriodInput] = useState('');
   const [isSavingActivePeriod, setIsSavingActivePeriod] = useState(false);
   const [isSavingNewPeriod, setIsSavingNewPeriod] = useState(false);
-  const [riskAppetiteInput, setRiskAppetiteInput] = useState<number | string>('');
   
-  // This state is only for displaying UPR info, not for setting it.
   const [assignedUprInfo, setAssignedUprInfo] = useState<string | null>(null);
 
 
@@ -52,25 +50,24 @@ export default function SettingsPage() {
       setDisplayNameInput(appUser.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || '');
       setSelectedPeriod(appUser.activePeriod || '');
       setAvailablePeriodsState(appUser.availablePeriods || []);
-      setRiskAppetiteInput(appUser.riskAppetite === null || appUser.riskAppetite === undefined ? '' : appUser.riskAppetite);
       
       if (appUser.uprId) {
-        // In a real app, you'd fetch UPR name based on uprId. For now, display ID.
-        setAssignedUprInfo(`Terassign ke UPR dengan ID: ${appUser.uprId}`);
+        // Di sini, kita akan mengandalkan AuthContext untuk menyediakan detail UPR yang di-assign, termasuk namanya,
+        // jadi tidak perlu fetch UPR name secara manual di sini lagi.
+        // Untuk sementara, jika AuthContext belum menyediakan assignedUpr.name, kita tampilkan ID.
+        // assignedUpr dari useAuth() akan memiliki nama UPR jika sudah berhasil di-fetch.
+        setAssignedUprInfo(`UPR ID: ${appUser.uprId}`); // Akan diganti dengan nama jika tersedia dari AuthContext
       } else {
         setAssignedUprInfo(null);
       }
 
-      // If the profile basics are not complete (e.g. first time setup flow)
       if (!isProfileComplete) {
         setInitialPeriodInput(appUser.activePeriod || DEFAULT_INITIAL_PERIOD);
       }
     } else if (!authContextLoading && currentUser && !profileLoading && !appUser) {
-      // This case is for new user, first time setup where appUser document doesn't exist yet
       console.log("[SettingsPage] New user or no appUser doc, setting defaults for setup form.");
       setDisplayNameInput(currentUser.displayName || currentUser.email?.split('@')[0] || 'Pengguna Baru');
       setInitialPeriodInput(DEFAULT_INITIAL_PERIOD);
-      setRiskAppetiteInput('');
       setAssignedUprInfo(null);
     }
   }, [appUser, currentUser, authContextLoading, profileLoading, isProfileComplete, router]);
@@ -91,10 +88,10 @@ export default function SettingsPage() {
     let periodToSetActive: string;
     let periodsToStore: string[];
 
-    if (isProfileComplete) { // Updating existing profile
-      periodToSetActive = selectedPeriod || (appUser?.activePeriod || DEFAULT_INITIAL_PERIOD); // Use current selected or existing active
+    if (isProfileComplete) { 
+      periodToSetActive = selectedPeriod || (appUser?.activePeriod || DEFAULT_INITIAL_PERIOD); 
       periodsToStore = appUser?.availablePeriods || [periodToSetActive];
-    } else { // Initial profile setup
+    } else { 
       if (!initialPeriodInput.trim() || !/^\d{4}(?:[-\/](?:S[1-2]|Q[1-4]))?$/.test(initialPeriodInput.trim()) && !/^\d{4}\/\d{4}$/.test(initialPeriodInput.trim())) {
         toast({ title: "Format Periode Tidak Valid", description: "Format tahun periode awal tidak valid. Gunakan YYYY, YYYY/YYYY atau YYYY-S1/Q1.", variant: "destructive" });
         return;
@@ -103,50 +100,29 @@ export default function SettingsPage() {
       periodsToStore = [periodToSetActive];
     }
 
-    let appetiteToSave: number | null = null;
-    if (riskAppetiteInput !== '') {
-        const parsedAppetite = Number(riskAppetiteInput);
-        if (isNaN(parsedAppetite) || parsedAppetite < 1 || parsedAppetite > 25) {
-            toast({ title: "Selera Risiko Tidak Valid", description: "Selera risiko harus berupa angka antara 1 dan 25.", variant: "destructive" });
-            return;
-        }
-        appetiteToSave = parsedAppetite;
-    }
-
     setIsSavingProfile(true);
     try {
       if (auth.currentUser && auth.currentUser.displayName !== displayNameInput.trim()) {
         await updateFirebaseAuthProfile(auth.currentUser, { displayName: displayNameInput.trim() });
       }
       
-      const profileDataToUpdate: Partial<AppUser> = {
+      const profileDataToUpdate: Partial<Omit<AppUser, 'riskAppetite'>> = { // Omit riskAppetite
         displayName: displayNameInput.trim(),
-        riskAppetite: appetiteToSave,
-        activePeriod: periodToSetActive, // Always set/update activePeriod
-        // uprId is NOT set here by the user. It's assigned by Admin.
-        // If appUser.uprId already exists, it will be preserved by updateUserProfileData merge.
+        activePeriod: periodToSetActive, 
       };
 
-      // Only set availablePeriods if it's an initial setup or if it's being managed explicitly
       if (!isProfileComplete) {
         profileDataToUpdate.availablePeriods = periodsToStore;
-        // For a brand new user, uprId remains null until admin assignment
-        if (!appUser?.uprId) { // Check if uprId is already there from a previous (incomplete) save
+        if (!appUser?.uprId) {
            profileDataToUpdate.uprId = null;
         }
       }
-      // If profile is complete, availablePeriods are managed by add/remove functions, so don't overwrite here unless intended.
 
       await updateUserProfileData(currentUser.uid, profileDataToUpdate);
-      await refreshAppUser(); // This will update isProfileComplete and isUprAssigned
+      await refreshAppUser(); 
       
       toast({ title: "Profil Disimpan", description: `Profil ${isProfileComplete ? 'diperbarui' : 'awal berhasil disimpan'}.` });
       
-      // After saving initial setup, if uprId is still not assigned, user stays on settings,
-      // but isProfileComplete (basics) should now be true.
-      // If profile was already complete, they stay on settings.
-      // AppLayout will handle global navigation if needed based on new context state.
-
     } catch (error: any) {
       console.error(`Error ${isProfileComplete ? 'updating' : 'saving initial'} profile:`, error);
       toast({ title: "Gagal Menyimpan Profil", description: error.message || "Terjadi kesalahan.", variant: "destructive" });
@@ -162,7 +138,7 @@ export default function SettingsPage() {
     try {
       await updateUserProfileData(currentUser.uid, { activePeriod: newPeriodValue });
       await refreshAppUser();
-      setSelectedPeriod(newPeriodValue); // Update local state for immediate UI reflection
+      setSelectedPeriod(newPeriodValue); 
       toast({ title: "Periode Aktif Diubah", description: `Periode aktif berhasil diatur ke ${newPeriodValue}. Data aplikasi akan disesuaikan.` });
     } catch (error: any) {
       console.error("Error updating active period:", error);
@@ -203,7 +179,7 @@ export default function SettingsPage() {
 
     try {
       await updateUserProfileData(currentUser.uid, { availablePeriods: updatedPeriods });
-      await refreshAppUser(); // This will update appUser and thus availablePeriodsState via useEffect
+      await refreshAppUser(); 
       toast({ title: "Periode Ditambahkan", description: `Periode "${trimmedPeriod}" berhasil ditambahkan.` });
       setNewPeriodInput('');
     } catch (error: any) {
@@ -214,7 +190,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Determine overall loading state for the page
   const pageLoading = authContextLoading || (currentUser && profileLoading);
 
   if (pageLoading) {
@@ -226,7 +201,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (!currentUser && !authContextLoading) { // Ensure auth loading is finished before redirect
+  if (!currentUser && !authContextLoading) { 
      return (
          <div className="text-center py-10">
             <p className="text-muted-foreground">Sesi tidak valid. Silakan login kembali.</p>
@@ -235,7 +210,6 @@ export default function SettingsPage() {
     );
   }
   
-  // If profile basics are not complete (displayName or activePeriod missing)
   if (!isProfileComplete) {
     return (
       <div className="space-y-6">
@@ -284,20 +258,7 @@ export default function SettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">Ini akan menjadi periode aktif pertama Anda.</p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="setupRiskAppetite">Selera Risiko (Opsional, angka 1-25)</Label>
-                <Input
-                  id="setupRiskAppetite"
-                  type="number"
-                  placeholder="Contoh: 15 (Moderat)"
-                  value={riskAppetiteInput}
-                  onChange={(e) => setRiskAppetiteInput(e.target.value)}
-                  min="1"
-                  max="25"
-                  disabled={isSavingProfile}
-                />
-                <p className="text-xs text-muted-foreground">Batas tertinggi skor risiko yang dapat diterima. Dikosongkan jika belum ditetapkan.</p>
-              </div>
+              {/* Risk Appetite input removed from initial setup */}
               <Button type="submit" disabled={isSavingProfile} className="w-full">
                 {isSavingProfile ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
                 Simpan Profil & Lanjutkan
@@ -309,7 +270,6 @@ export default function SettingsPage() {
     );
   }
 
-  // If profile basics are complete, show full settings page
   return (
     <div className="space-y-6">
       <PageHeader
@@ -340,7 +300,7 @@ export default function SettingsPage() {
                 <Label>UPR Terkait</Label>
                 <div className="p-3 border rounded-md bg-muted text-sm min-h-[40px] flex items-center">
                   {isUprAssigned && appUser?.uprId 
-                    ? (assignedUprInfo || `ID UPR: ${appUser.uprId}`) 
+                    ? (useAuth().assignedUpr?.name || `ID UPR: ${appUser.uprId}`) // Display UPR name if available
                     : (
                         <span className="italic text-amber-600 dark:text-amber-400">
                             <AlertTriangle className="inline h-4 w-4 mr-1" />
@@ -350,23 +310,10 @@ export default function SettingsPage() {
                   }
                 </div>
                 <p className="text-xs text-muted-foreground flex items-center">
-                    <Info className="w-3 h-3 mr-1 shrink-0" /> UPR di-assign oleh Administrator dan tidak dapat diubah di sini.
+                    <Info className="w-3 h-3 mr-1 shrink-0" /> UPR di-assign oleh Administrator dan tidak dapat diubah di sini. Selera Risiko UPR dikelola di menu Admin.
                 </p>
             </div>
-            <div className="space-y-1.5">
-                <Label htmlFor="riskAppetite">Selera Risiko (Angka 1-25)</Label>
-                <Input
-                  id="riskAppetite"
-                  type="number"
-                  placeholder="Contoh: 15 (Moderat)"
-                  value={riskAppetiteInput}
-                  onChange={(e) => setRiskAppetiteInput(e.target.value)}
-                  min="1"
-                  max="25"
-                  disabled={isSavingProfile}
-                />
-                <p className="text-xs text-muted-foreground">Batas tertinggi skor risiko yang dapat diterima UPR Anda. Kosongkan jika tidak ditetapkan.</p>
-            </div>
+             {/* Risk Appetite input removed from user profile settings */}
              <Button type="submit" disabled={isSavingProfile || !displayNameInput.trim()}>
                 {isSavingProfile ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
                 Simpan Perubahan Profil
@@ -406,7 +353,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Kelola Periode yang Tersedia</CardTitle>
-          <CardDescription>Tambahkan periode pelaporan baru ke sistem (berlaku untuk semua UPR yang Anda kelola jika Anda Admin, atau UPR Anda saat ini jika user biasa).</CardDescription>
+          <CardDescription>Tambahkan periode pelaporan baru ke sistem.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -440,3 +387,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
