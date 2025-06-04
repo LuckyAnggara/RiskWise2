@@ -21,48 +21,37 @@ import {
 import { CONTROL_MEASURES_COLLECTION } from './collectionNames';
 
 export async function addControlMeasure(
-  data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType'>,
+  data: Omit<ControlMeasure, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'uprId' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' | 'controlType'>,
   riskCauseId: string,
   potentialRiskId: string,
   goalId: string,
-  userId: string,
+  uprId: string, // Added uprId
   period: string,
+  userId: string, // Creator's Firebase UID
   controlType: ControlMeasureTypeKey
 ): Promise<ControlMeasure> {
-  if (!userId || typeof userId !== 'string' || userId.trim() === "") {
-    console.error("[controlMeasureService] addControlMeasure: userId is invalid.", {userId});
-    throw new Error("User ID tidak valid untuk menambahkan tindakan pengendalian.");
-  }
-  if (!period || typeof period !== 'string' || period.trim() === "") {
-    console.error("[controlMeasureService] addControlMeasure: period is invalid.", {period});
-    throw new Error("Periode tidak valid untuk menambahkan tindakan pengendalian.");
-  }
-  if (!riskCauseId || !potentialRiskId || !goalId) {
-    console.error("[controlMeasureService] addControlMeasure: parent IDs are invalid.", {riskCauseId, potentialRiskId, goalId});
-    throw new Error("ID Induk (Penyebab/Potensi/Sasaran) tidak valid.");
-  }
-  if (!controlType || typeof controlType !== 'string' || controlType.trim() === "") {
-    console.error("[controlMeasureService] addControlMeasure: controlType is invalid.", {controlType});
-    throw new Error("Tipe Pengendalian tidak valid.");
+  if (!uprId || !period || !userId || !riskCauseId || !potentialRiskId || !goalId || !controlType) {
+    console.error("[controlMeasureService] addControlMeasure: Missing one or more IDs or controlType.", {uprId, period, userId, riskCauseId, potentialRiskId, goalId, controlType});
+    throw new Error("ID UPR, Periode, User, Induk, Tipe Pengendalian tidak valid.");
   }
 
   try {
-    // Calculate the next sequence number for this control type within this risk cause
-    const allControlMeasuresForCause = await getControlMeasuresByRiskCauseId(riskCauseId, userId, period);
+    const allControlMeasuresForCause = await getControlMeasuresByRiskCauseId(riskCauseId, uprId, period, userId); // Pass uprId and period
     const existingControlsOfType = allControlMeasuresForCause.filter(cm => cm.controlType === controlType);
     const calculatedSequenceNumber = existingControlsOfType.length + 1;
 
-    console.log(`[controlMeasureService] Calculated sequenceNumber for new ${controlType} control: ${calculatedSequenceNumber} for riskCauseId: ${riskCauseId}`);
+    console.log(`[controlMeasureService] Calculated sequence for new ${controlType} control: ${calculatedSequenceNumber} for RC ${riskCauseId} in UPR ${uprId}`);
 
     const docDataToSave = {
       ...data,
       riskCauseId,
       potentialRiskId,
       goalId,
-      userId,
+      uprId, // Store uprId
       period,
-      controlType, // Use the passed controlType
-      sequenceNumber: calculatedSequenceNumber, // Ensure this uses the calculated value
+      userId, // Store creator's Firebase UID
+      controlType, 
+      sequenceNumber: calculatedSequenceNumber,
       keyControlIndicator: data.keyControlIndicator || null,
       target: data.target || null,
       responsiblePerson: data.responsiblePerson || null,
@@ -81,30 +70,31 @@ export async function addControlMeasure(
       riskCauseId,
       potentialRiskId,
       goalId,
-      userId,
+      uprId,
       period,
+      userId,
       controlType,
       sequenceNumber: calculatedSequenceNumber,
-      createdAt: nowISO, // Placeholder, actual value is server timestamp
-      updatedAt: nowISO, // Placeholder
+      createdAt: nowISO, 
+      updatedAt: nowISO, 
     };
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[controlMeasureService] Error adding control measure to Firestore: ", errorMessage, error.code, error.details);
-    throw new Error(`Gagal menambahkan tindakan pengendalian ke database. Pesan: ${errorMessage}`);
+    console.error("[controlMeasureService] Error adding control measure: ", errorMessage);
+    throw new Error(`Gagal menambahkan tindakan pengendalian. Pesan: ${errorMessage}`);
   }
 }
 
-export async function getControlMeasuresByRiskCauseId(riskCauseId: string, userId: string, period: string): Promise<ControlMeasure[]> {
-  if (!userId || !period || !riskCauseId) {
-    console.warn("[controlMeasureService] getControlMeasuresByRiskCauseId: userId, period, or riskCauseId is missing.", { userId, period, riskCauseId });
+export async function getControlMeasuresByRiskCauseId(riskCauseId: string, uprId: string, period: string, userIdForContextValidation?: string): Promise<ControlMeasure[]> {
+  if (!uprId || !period || !riskCauseId) {
+    console.warn("[controlMeasureService] getControlMeasuresByRiskCauseId: uprId, period, or riskCauseId is missing.");
     return [];
   }
   try {
     const q = query(
       collection(db, CONTROL_MEASURES_COLLECTION),
       where("riskCauseId", "==", riskCauseId),
-      where("userId", "==", userId),
+      where("uprId", "==", uprId), // Filter by uprId
       where("period", "==", period),
       orderBy("controlType", "asc"), 
       orderBy("sequenceNumber", "asc")
@@ -120,6 +110,7 @@ export async function getControlMeasuresByRiskCauseId(riskCauseId: string, userI
       controlMeasures.push({ 
         id: docSnap.id, 
         ...data,
+        uprId: data.uprId,
         riskCauseId: data.riskCauseId,
         potentialRiskId: data.potentialRiskId,
         goalId: data.goalId,
@@ -140,29 +131,19 @@ export async function getControlMeasuresByRiskCauseId(riskCauseId: string, userI
     return controlMeasures;
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[controlMeasureService] Error getting control measures from Firestore: ", errorMessage, error.code, error);
-    let detailedErrorMessage = "Gagal mengambil daftar tindakan pengendalian dari database.";
-    if (error.code === 'failed-precondition' || (errorMessage.toLowerCase().includes("index"))) {
-        detailedErrorMessage += " Ini seringkali disebabkan oleh indeks komposit yang hilang di Firestore. Silakan periksa Firebase Console Anda (Firestore Database > Indexes) untuk membuat indeks yang diperlukan.";
-    } else {
-        detailedErrorMessage += ` Pesan Asli: ${errorMessage}`;
+    console.error("[controlMeasureService] Error getting control measures: ", errorMessage);
+    let detailedErrorMessage = "Gagal mengambil daftar tindakan pengendalian.";
+    if (error.code === 'failed-precondition') {
+        detailedErrorMessage += " Indeks komposit mungkin hilang. Periksa Firebase Console.";
     }
     throw new Error(detailedErrorMessage);
   }
 }
 
-export async function getControlMeasureById(id: string, userId: string, period: string): Promise<ControlMeasure | null> {
-  if (!id || typeof id !== 'string' || id.trim() === "") {
-    console.error("[controlMeasureService] getControlMeasureById: id is invalid.", {id});
-    throw new Error("ID Tindakan Pengendalian tidak valid.");
-  }
-  if (!userId || typeof userId !== 'string' || userId.trim() === "") {
-    console.error("[controlMeasureService] getControlMeasureById: userId is invalid.", {userId});
-    throw new Error("User ID tidak valid untuk mengambil tindakan pengendalian.");
-  }
-  if (!period || typeof period !== 'string' || period.trim() === "") {
-    console.error("[controlMeasureService] getControlMeasureById: period is invalid.", {period});
-    throw new Error("Periode tidak valid untuk mengambil tindakan pengendalian.");
+export async function getControlMeasureById(id: string, uprId: string, period: string): Promise<ControlMeasure | null> {
+  if (!id || !uprId || !period) {
+    console.error("[controlMeasureService] getControlMeasureById: id, uprId, or period is invalid.");
+    throw new Error("ID Tindakan Pengendalian, UPR ID, atau Periode tidak valid.");
   }
 
   try {
@@ -171,9 +152,8 @@ export async function getControlMeasureById(id: string, userId: string, period: 
 
     if (docSnap.exists()) {
       const data = docSnap.data();
-      // Validasi konteks
-      if (data.userId !== userId || data.period !== period) {
-        console.warn(`ControlMeasure ${id} found, but does not match current user/period context. Expected User: ${userId}, Period: ${period}. Found: User: ${data.userId}, Period: ${data.period}`);
+      if (data.uprId !== uprId || data.period !== period) {
+        console.warn(`ControlMeasure ${id} found, but does not match current UPR/period context.`);
         return null;
       }
 
@@ -184,25 +164,27 @@ export async function getControlMeasureById(id: string, userId: string, period: 
       return {
         id: docSnap.id,
         ...data,
+        uprId: data.uprId,
         createdAt: createdAtTimestamp.toISOString(),
         updatedAt: updatedAtTimestamp ? updatedAtTimestamp.toISOString() : undefined,
         deadline: deadlineTimestamp ? deadlineTimestamp.toISOString() : null,
       } as ControlMeasure;
     } else {
-      console.warn(`ControlMeasure with ID ${id} not found.`);
+      console.warn(`[controlMeasureService] ControlMeasure with ID ${id} not found.`);
       return null;
     }
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error(`[controlMeasureService] Error getting control measure by ID ${id} from Firestore: `, errorMessage);
+    console.error(`[controlMeasureService] Error getting control measure by ID ${id}: `, errorMessage);
     throw new Error(`Gagal mengambil detail tindakan pengendalian. Pesan: ${errorMessage}`);
   }
 }
 
 
-export async function updateControlMeasure(id: string, data: Partial<Omit<ControlMeasure, 'id' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'userId' | 'period' | 'createdAt' | 'sequenceNumber' | 'updatedAt'>>): Promise<void> {
+export async function updateControlMeasure(id: string, data: Partial<Omit<ControlMeasure, 'id' | 'uprId' | 'riskCauseId' | 'potentialRiskId' | 'goalId' | 'userId' | 'period' | 'createdAt' | 'sequenceNumber' | 'updatedAt'>>): Promise<void> {
+  // uprId, riskCauseId, etc., are not updated here. Context should be validated by the caller or in a higher-level function.
   if (!id || typeof id !== 'string' || id.trim() === "") {
-    console.error("[controlMeasureService] Error in updateControlMeasure: id is invalid.", {id});
+    console.error("[controlMeasureService] updateControlMeasure: id is invalid.", {id});
     throw new Error("ID Tindakan Pengendalian tidak valid untuk pembaruan.");
   }
   try {
@@ -210,7 +192,7 @@ export async function updateControlMeasure(id: string, data: Partial<Omit<Contro
     const updateData = {
         ...data,
         deadline: data.deadline === undefined ? undefined : (data.deadline || null),
-        budget: data.budget === undefined ? undefined : (data.budget || null),
+        budget: data.budget === undefined ? undefined : (data.budget === null ? null : Number(data.budget)),
         keyControlIndicator: data.keyControlIndicator === undefined ? undefined : (data.keyControlIndicator || null),
         target: data.target === undefined ? undefined : (data.target || null),
         responsiblePerson: data.responsiblePerson === undefined ? undefined : (data.responsiblePerson || null),
@@ -220,14 +202,14 @@ export async function updateControlMeasure(id: string, data: Partial<Omit<Contro
     await updateDoc(docRef, updateData);
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[controlMeasureService] Error updating control measure in Firestore: ", errorMessage, error.code, error.details);
-    throw new Error(`Gagal memperbarui tindakan pengendalian di database. Pesan: ${errorMessage}`);
+    console.error("[controlMeasureService] Error updating control measure: ", errorMessage);
+    throw new Error(`Gagal memperbarui tindakan pengendalian. Pesan: ${errorMessage}`);
   }
 }
 
 export async function deleteControlMeasure(id: string, batch?: WriteBatch): Promise<void> {
   if (!id || typeof id !== 'string' || id.trim() === "") {
-    console.error("[controlMeasureService] Error in deleteControlMeasure: id is invalid.", {id});
+    console.error("[controlMeasureService] deleteControlMeasure: id is invalid.", {id});
     throw new Error("ID Tindakan Pengendalian tidak valid untuk penghapusan.");
   }
   const controlMeasureRef = doc(db, CONTROL_MEASURES_COLLECTION, id);
@@ -239,10 +221,8 @@ export async function deleteControlMeasure(id: string, batch?: WriteBatch): Prom
       await deleteDoc(controlMeasureRef);
     } catch (error: any) {
       const errorMessage = error.message || String(error);
-      console.error("[controlMeasureService] Error deleting control measure from Firestore: ", errorMessage, error.code, error.details);
-      throw new Error(`Gagal menghapus tindakan pengendalian dari database. Pesan: ${errorMessage}`);
+      console.error("[controlMeasureService] Error deleting control measure: ", errorMessage);
+      throw new Error(`Gagal menghapus tindakan pengendalian. Pesan: ${errorMessage}`);
     }
   }
 }
-
-    

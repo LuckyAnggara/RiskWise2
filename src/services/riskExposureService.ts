@@ -11,24 +11,26 @@ import {
   where,
   orderBy,
   doc,
-  setDoc, // Menggunakan setDoc untuk upsert jika kita tahu ID uniknya (kombinasi sesi+penyebab)
+  setDoc, 
   getDoc,
   Timestamp,
   serverTimestamp,
   deleteDoc,
+  type WriteBatch, // Added WriteBatch type
+  writeBatch // Added writeBatch function if used directly
 } from 'firebase/firestore';
 import { RISK_EXPOSURES_COLLECTION } from './collectionNames';
 
-// Fungsi untuk membuat ID dokumen gabungan
 const createExposureDocId = (monitoringSessionId: string, riskCauseId: string) => `${monitoringSessionId}_${riskCauseId}`;
 
 export async function upsertRiskExposure(
-  data: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period'>,
-  userId: string,
-  period: string // Periode aplikasi saat sesi dibuat
+  data: Omit<RiskExposure, 'id' | 'recordedAt' | 'updatedAt' | 'userId' | 'period' | 'uprId'>,
+  uprId: string, // Added uprId
+  period: string, 
+  userId: string // Creator's Firebase UID
 ): Promise<RiskExposure> {
-  if (!userId || !period) {
-    throw new Error("User ID dan Periode aplikasi wajib diisi.");
+  if (!uprId || !period || !userId) {
+    throw new Error("UPR ID, Periode aplikasi, dan User ID wajib diisi.");
   }
   if (!data.monitoringSessionId || !data.riskCauseId) {
     throw new Error("ID Sesi Pemantauan dan ID Penyebab Risiko wajib diisi.");
@@ -40,17 +42,21 @@ export async function upsertRiskExposure(
   try {
     const docDataToSave = {
       ...data,
-      userId,
-      period, // Periode aplikasi
-      // recordedAt akan di-set jika ini adalah entri baru, updatedAt akan selalu di-set
+      uprId, // Store uprId
+      period, 
+      userId, // Store creator's Firebase UID
     };
 
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      // Update
+      // Validate context if doc exists
+      const existingData = docSnap.data();
+      if (existingData.uprId !== uprId || existingData.period !== period) {
+          console.error(`[riskExposureService] Upsert failed for ${docId}. Context mismatch. Expected UPR: ${uprId}, Period: ${period}. Found: ${existingData.uprId}, ${existingData.period}.`);
+          throw new Error("Gagal menyimpan paparan risiko: Konteks data tidak cocok.");
+      }
       await setDoc(docRef, { ...docDataToSave, updatedAt: serverTimestamp() }, { merge: true });
     } else {
-      // Create
       await setDoc(docRef, { ...docDataToSave, recordedAt: serverTimestamp(), updatedAt: serverTimestamp() });
     }
     
@@ -65,6 +71,7 @@ export async function upsertRiskExposure(
     return {
       id: updatedDocSnap.id,
       ...data,
+      uprId,
       userId,
       period,
       recordedAt,
@@ -80,20 +87,21 @@ export async function upsertRiskExposure(
 
 export async function getRiskExposuresBySession(
   monitoringSessionId: string, 
-  userId: string, 
-  period: string // Periode aplikasi saat sesi dibuat
+  uprId: string, // Added uprId
+  period: string, 
+  userIdForContextValidation?: string // User who created the session, for validation if needed
 ): Promise<RiskExposure[]> {
-  if (!monitoringSessionId || !userId || !period) {
-    console.warn("[riskExposureService] getRiskExposuresBySession: One or more required parameters are missing.", { monitoringSessionId, userId, period });
+  if (!monitoringSessionId || !uprId || !period) {
+    console.warn("[riskExposureService] getRiskExposuresBySession: One or more required parameters are missing.");
     return [];
   }
   try {
     const q = query(
       collection(db, RISK_EXPOSURES_COLLECTION),
       where("monitoringSessionId", "==", monitoringSessionId),
-      where("userId", "==", userId),
-      where("period", "==", period), // Ini adalah periode sesi
-      orderBy("riskCauseId", "asc") // Atau orderBy recordedAt jika lebih relevan
+      where("uprId", "==", uprId), // Filter by uprId
+      where("period", "==", period), 
+      orderBy("riskCauseId", "asc") 
     );
     const querySnapshot = await getDocs(q);
     const exposures: RiskExposure[] = [];
@@ -105,6 +113,9 @@ export async function getRiskExposuresBySession(
       exposures.push({ 
         id: docSnap.id,
         ...data,
+        uprId: data.uprId,
+        userId: data.userId, // User who recorded this specific exposure
+        period: data.period,
         recordedAt,
         updatedAt,
       } as RiskExposure);
@@ -112,33 +123,31 @@ export async function getRiskExposuresBySession(
     return exposures;
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[riskExposureService] Error getting risk exposures from Firestore: ", error.code, errorMessage);
+    console.error("[riskExposureService] Error getting risk exposures: ", error.code, errorMessage);
     let detailedErrorMessage = "Gagal mengambil data paparan risiko.";
     if (error.code === 'failed-precondition') {
-        detailedErrorMessage += " Ini mungkin karena indeks komposit yang hilang. Periksa Firebase Console (Firestore Database > Indexes) dan buat indeks yang disarankan jika ada.";
-    } else {
-      detailedErrorMessage += ` Pesan: ${errorMessage}`;
+        detailedErrorMessage += " Indeks komposit mungkin hilang. Periksa Firebase Console.";
     }
     throw new Error(detailedErrorMessage);
   }
 }
 
-export async function deleteRiskExposuresByMonitoringSession(monitoringSessionId: string, userId: string, period: string, batch?: WriteBatch) {
-  console.log(`[riskExposureService] Attempting to delete RiskExposures for session: ${monitoringSessionId}, user: ${userId}, period: ${period}`);
+export async function deleteRiskExposuresByMonitoringSession(monitoringSessionId: string, uprId: string, period: string, batchInstance?: WriteBatch) {
+  console.log(`[riskExposureService] Attempting to delete RiskExposures for session: ${monitoringSessionId}, UPR: ${uprId}, Period: ${period}`);
   const q = query(
     collection(db, RISK_EXPOSURES_COLLECTION),
     where("monitoringSessionId", "==", monitoringSessionId),
-    where("userId", "==", userId),
-    where("period", "==", period)
+    where("uprId", "==", uprId), // Ensure context matches
+    where("period", "==", period)  // Ensure context matches
   );
   const snapshot = await getDocs(q);
-  const localBatch = batch || writeBatch(db);
+  const currentBatch = batchInstance || writeBatch(db); // Use provided batch or create new
   snapshot.docs.forEach(doc => {
     console.log(`[riskExposureService] Adding RiskExposure ${doc.id} to delete batch.`);
-    localBatch.delete(doc.ref);
+    currentBatch.delete(doc.ref);
   });
-  if (!batch) {
-    await localBatch.commit();
+  if (!batchInstance) { // If this function created the batch, it should commit it
+    await currentBatch.commit();
     console.log(`[riskExposureService] Committed batch delete for RiskExposures of session ${monitoringSessionId}.`);
   }
 }

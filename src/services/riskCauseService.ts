@@ -20,25 +20,29 @@ import {
   type WriteBatch
 } from 'firebase/firestore';
 import { RISK_CAUSES_COLLECTION, CONTROL_MEASURES_COLLECTION } from './collectionNames';
-// Import deleteControlMeasure if it's directly used here for individual deletion,
-// otherwise, if deleteRiskCauseAndSubCollections handles it, it's fine.
-// For now, assuming deleteRiskCauseAndSubCollections handles children.
+import { deleteControlMeasure } from './controlMeasureService'; // Ensure this uses uprId and period if needed for context
 
 export async function addRiskCause(
-  data: Omit<RiskCause, 'id' | 'createdAt' | 'period' | 'userId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' >,
+  data: Omit<RiskCause, 'id' | 'createdAt' | 'period' | 'userId' | 'uprId' | 'potentialRiskId' | 'goalId' | 'sequenceNumber' >,
   potentialRiskId: string,
   goalId: string,
-  userId: string,
+  uprId: string, // Added uprId
   period: string,
+  userId: string, // Creator's Firebase UID
   sequenceNumber: number
 ): Promise<RiskCause> {
+  if (!uprId || !period || !userId || !potentialRiskId || !goalId) {
+    console.error("[riskCauseService] addRiskCause: Missing one or more IDs.", {uprId, period, userId, potentialRiskId, goalId});
+    throw new Error("ID UPR, Periode, User, Potensi Risiko, atau Sasaran tidak valid.");
+  }
   try {
     const docRef = await addDoc(collection(db, RISK_CAUSES_COLLECTION), {
       ...data,
       potentialRiskId,
       goalId,
-      userId,
+      uprId, // Store uprId
       period,
+      userId, // Store creator's Firebase UID
       sequenceNumber,
       createdAt: serverTimestamp(),
       keyRiskIndicator: data.keyRiskIndicator || null,
@@ -51,24 +55,29 @@ export async function addRiskCause(
       ...data,
       potentialRiskId,
       goalId,
-      userId,
+      uprId,
       period,
+      userId,
       sequenceNumber,
       createdAt: new Date().toISOString(), 
     };
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Error adding risk cause to Firestore: ", errorMessage);
-    throw new Error(`Gagal menambahkan penyebab risiko ke database. Pesan: ${errorMessage}`);
+    console.error("[riskCauseService] Error adding risk cause: ", errorMessage);
+    throw new Error(`Gagal menambahkan penyebab risiko. Pesan: ${errorMessage}`);
   }
 }
 
-export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, userId: string, period: string): Promise<RiskCause[]> {
+export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, uprId: string, period: string, userIdForContextValidation?: string): Promise<RiskCause[]> {
+  if (!uprId || !period || !potentialRiskId) {
+    console.warn(`[riskCauseService] getRiskCausesByPotentialRiskId: uprId, period, or potentialRiskId is missing.`);
+    return [];
+  }
   try {
     const q = query(
       collection(db, RISK_CAUSES_COLLECTION),
       where("potentialRiskId", "==", potentialRiskId),
-      where("userId", "==", userId),
+      where("uprId", "==", uprId), // Filter by uprId
       where("period", "==", period),
       orderBy("sequenceNumber", "asc")
     );
@@ -85,7 +94,10 @@ export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, us
       
       riskCauses.push({ 
         id: doc.id, 
-        ...data, 
+        ...data,
+        uprId: data.uprId,
+        userId: data.userId, // User who created/owns this RC record
+        period: data.period,
         createdAt: createdAtISO, 
         analysisUpdatedAt: analysisUpdatedAtISO,
         keyRiskIndicator: data.keyRiskIndicator || null,
@@ -97,30 +109,27 @@ export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, us
     return riskCauses;
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Error getting risk causes from Firestore: ", errorMessage, error.code, error);
-    let detailedErrorMessage = "Gagal mengambil daftar penyebab risiko dari database.";
-    if (error instanceof Error && error.message) {
-        detailedErrorMessage += ` Pesan Asli: ${error.message}`;
-    }
-    if ((error as any).code === 'failed-precondition') {
-        detailedErrorMessage += " Ini seringkali disebabkan oleh indeks komposit yang hilang di Firestore. Silakan periksa Firebase Console Anda (Firestore Database > Indexes) untuk membuat indeks yang diperlukan. Link untuk membuat indeks mungkin ada di log error server/konsol browser Anda.";
+    console.error("[riskCauseService] Error getting risk causes: ", errorMessage);
+    let detailedErrorMessage = "Gagal mengambil daftar penyebab risiko.";
+     if (error.code === 'failed-precondition') {
+        detailedErrorMessage += " Indeks komposit mungkin hilang. Periksa Firebase Console.";
     }
     throw new Error(detailedErrorMessage);
   }
 }
 
-export async function getRiskCauseById(id: string, userId: string, period: string): Promise<RiskCause | null> {
+export async function getRiskCauseById(id: string, uprId: string, period: string): Promise<RiskCause | null> {
+  if (!uprId || !period || !id) {
+    console.warn(`[riskCauseService] getRiskCauseById: uprId, period, or id is missing.`);
+    return null;
+  }
   try {
-    if (!userId || !period) {
-      console.warn(`[riskCauseService] getRiskCauseById: userId or period is missing for id ${id}`);
-      return null;
-    }
     const docRef = doc(db, RISK_CAUSES_COLLECTION, id);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      if (data.userId !== userId || data.period !== period) {
-        console.warn(`RiskCause ${id} found, but does not match current user/period context. Expected User: ${userId}, Period: ${period}. Found: User: ${data.userId}, Period: ${data.period}`);
+      if (data.uprId !== uprId || data.period !== period) {
+        console.warn(`RiskCause ${id} found, but does not match current UPR/period context.`);
         return null;
       }
 
@@ -133,6 +142,9 @@ export async function getRiskCauseById(id: string, userId: string, period: strin
       return { 
         id: docSnap.id, 
         ...data, 
+        uprId: data.uprId,
+        userId: data.userId,
+        period: data.period,
         createdAt: createdAtISO, 
         analysisUpdatedAt: analysisUpdatedAtISO,
         keyRiskIndicator: data.keyRiskIndicator || null,
@@ -141,15 +153,17 @@ export async function getRiskCauseById(id: string, userId: string, period: strin
         impact: data.impact || null,
       } as RiskCause;
     }
+    console.warn(`[riskCauseService] RiskCause with ID ${id} not found.`);
     return null;
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Error getting risk cause by ID from Firestore: ", errorMessage);
-    throw new Error(`Gagal mengambil detail penyebab risiko dari database. Pesan: ${errorMessage}`);
+    console.error("[riskCauseService] Error getting risk cause by ID: ", errorMessage);
+    throw new Error(`Gagal mengambil detail penyebab risiko. Pesan: ${errorMessage}`);
   }
 }
 
-export async function updateRiskCause(id: string, data: Partial<Omit<RiskCause, 'id' | 'potentialRiskId' | 'goalId' | 'userId' | 'period' | 'createdAt' | 'sequenceNumber'>>): Promise<void> {
+export async function updateRiskCause(id: string, data: Partial<Omit<RiskCause, 'id' | 'uprId' | 'potentialRiskId' | 'goalId' | 'userId' | 'period' | 'createdAt' | 'sequenceNumber'>>): Promise<void> {
+  // uprId, potentialRiskId, goalId, userId, period, createdAt, sequenceNumber are generally not updatable this way.
   try {
     const docRef = doc(db, RISK_CAUSES_COLLECTION, id);
     await updateDoc(docRef, {
@@ -162,47 +176,60 @@ export async function updateRiskCause(id: string, data: Partial<Omit<RiskCause, 
     });
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Error updating risk cause in Firestore: ", errorMessage);
-    throw new Error(`Gagal memperbarui penyebab risiko di database. Pesan: ${errorMessage}`);
+    console.error("[riskCauseService] Error updating risk cause: ", errorMessage);
+    throw new Error(`Gagal memperbarui penyebab risiko. Pesan: ${errorMessage}`);
   }
 }
 
-export async function deleteRiskCauseAndSubCollections(riskCauseId: string, userId: string, period: string, batch?: WriteBatch): Promise<void> {
+export async function deleteRiskCauseAndSubCollections(riskCauseId: string, uprId: string, period: string, batch?: WriteBatch): Promise<void> {
+  // userId (creator) is not strictly needed for deletion query if uprId/period is the main context.
   const localBatch = batch || writeBatch(db);
+  console.log(`[riskCauseService] Attempting to delete RiskCause: ${riskCauseId} for UPR: ${uprId}, Period: ${period}`);
   try {
-    // Ensure the risk cause belongs to the user and period before deleting
     const riskCauseRef = doc(db, RISK_CAUSES_COLLECTION, riskCauseId);
     const rcDoc = await getDoc(riskCauseRef);
     if (rcDoc.exists()) {
         const rcData = rcDoc.data();
-        if (rcData.userId !== userId || rcData.period !== period) {
-            throw new Error("Penyebab Risiko tidak dapat dihapus: tidak cocok dengan konteks pengguna/periode.");
+        if (rcData.uprId !== uprId || rcData.period !== period) {
+            console.error(`Attempt to delete RiskCause ${riskCauseId} denied: context mismatch.`);
+            throw new Error("Operasi tidak diizinkan: penyebab risiko tidak cocok dengan konteks UPR/periode.");
         }
     } else {
-        console.warn(`Penyebab Risiko dengan ID ${riskCauseId} tidak ditemukan saat mencoba menghapus sub-koleksi.`);
+        console.warn(`RiskCause with ID ${riskCauseId} not found. Skipping further sub-collection deletion for this cause.`);
+        // If it doesn't exist, we can still proceed if part of a larger batch (e.g., deleting a PR)
         if(!batch) return; 
     }
-
 
     const controlsQuery = query(
       collection(db, CONTROL_MEASURES_COLLECTION),
       where("riskCauseId", "==", riskCauseId),
-      where("userId", "==", userId),
+      where("uprId", "==", uprId), // Filter by uprId
       where("period", "==", period)
     );
     const controlsSnapshot = await getDocs(controlsQuery);
     controlsSnapshot.forEach(controlDoc => {
+      // No sub-collections under ControlMeasure for now, just delete the document
       localBatch.delete(controlDoc.ref);
     });
+    console.log(`Added ${controlsSnapshot.size} control measures for RiskCause ${riskCauseId} to delete batch.`);
 
-    localBatch.delete(riskCauseRef);
+    if (rcDoc.exists()) { // Only delete the risk cause doc if it was found
+        localBatch.delete(riskCauseRef);
+        console.log(`RiskCause ${riskCauseId} added to delete batch.`);
+    }
 
-    if (!batch) { // If this function initiated the batch, commit it.
+
+    if (!batch) { 
       await localBatch.commit();
+      console.log(`RiskCause ${riskCauseId} and related control measures committed for deletion.`);
     }
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Error deleting risk cause and its control measures: ", errorMessage);
-    throw new Error(`Gagal menghapus penyebab risiko dan tindakan pengendalian terkait. Pesan: ${errorMessage}`);
+    console.error("[riskCauseService] Error deleting risk cause: ", errorMessage);
+    if (!(error.message && error.message.toLowerCase().includes("no document to update"))){
+        throw new Error(`Gagal menghapus penyebab risiko dan data terkaitnya. Pesan: ${errorMessage}`);
+    } else {
+        console.warn("Skipped re-throwing error during cascading delete, likely already deleted:", errorMessage);
+    }
   }
 }

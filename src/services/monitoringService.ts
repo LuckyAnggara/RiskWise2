@@ -15,32 +15,54 @@ import {
   Timestamp,
   serverTimestamp,
   getDoc,
-  deleteDoc, // Added deleteDoc
-  writeBatch, // Added writeBatch
+  deleteDoc, 
+  writeBatch, 
 } from 'firebase/firestore';
-import { MONITORING_SESSIONS_COLLECTION, RISK_EXPOSURES_COLLECTION } from './collectionNames'; // Added RISK_EXPOSURES_COLLECTION
-import { deleteRiskExposuresByMonitoringSession } from './riskExposureService'; // Import function to delete related exposures
+import { MONITORING_SESSIONS_COLLECTION, RISK_EXPOSURES_COLLECTION, MONITORED_CONTROL_MEASURES_DATA_COLLECTION } from './collectionNames'; 
+import { deleteRiskExposuresByMonitoringSession } from './riskExposureService'; 
+// Import function to delete related MonitoredControlMeasures if it exists, or implement here.
+
+export async function deleteMonitoredControlMeasuresBySession(monitoringSessionId: string, uprId: string, period: string, batch?: WriteBatch) {
+    const q = query(
+        collection(db, MONITORED_CONTROL_MEASURES_DATA_COLLECTION),
+        where("monitoringSessionId", "==", monitoringSessionId),
+        where("uprId", "==", uprId),
+        where("period", "==", period)
+    );
+    const snapshot = await getDocs(q);
+    const localBatch = batch || writeBatch(db);
+    snapshot.docs.forEach(doc => {
+        localBatch.delete(doc.ref);
+    });
+    if (!batch) {
+        await localBatch.commit();
+    }
+    console.log(`[monitoringService] MonitoredControlMeasures for session ${monitoringSessionId} processed for deletion.`);
+}
+
 
 export async function addMonitoringSession(
-  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period'>,
-  userId: string,
-  period: string // Periode aplikasi saat sesi ini dibuat
+  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'uprId'>,
+  uprId: string, // Added uprId
+  period: string, 
+  userId: string // Creator's Firebase UID
 ): Promise<MonitoringSession> {
-  if (!userId || !period) {
-    console.error("Error in addMonitoringSession: userId or period is missing.", { userId, period });
-    throw new Error("User ID atau Periode aplikasi tidak valid untuk memulai sesi pemantauan.");
+  if (!uprId || !period || !userId) {
+    console.error("Error in addMonitoringSession: uprId, period, or userId is missing.", { uprId, period, userId });
+    throw new Error("UPR ID, Periode aplikasi, atau User ID tidak valid.");
   }
   if (!data.name || !data.startDate || !data.endDate) {
     console.error("Error in addMonitoringSession: name, startDate, or endDate is missing.", data);
-    throw new Error("Nama periode pemantauan, tanggal mulai, dan tanggal selesai harus diisi.");
+    throw new Error("Nama sesi, tanggal mulai, dan tanggal selesai harus diisi.");
   }
 
   try {
     const docDataToSave = {
       ...data,
-      userId,
+      uprId, // Store uprId
       period,
-      status: data.status || 'Direncanakan', // Default status
+      userId, // Store creator's Firebase UID
+      status: data.status || 'Direncanakan', 
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -58,8 +80,9 @@ export async function addMonitoringSession(
     return {
       id: docRef.id,
       ...data,
-      userId,
+      uprId,
       period,
+      userId,
       status: newDocData.status as MonitoringSession['status'],
       createdAt: createdAtTimestamp.toISOString(),
       updatedAt: updatedAtTimestamp.toISOString(),
@@ -67,22 +90,23 @@ export async function addMonitoringSession(
 
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("Error adding monitoring session to Firestore: ", errorMessage);
-    throw new Error(`Gagal menambahkan sesi pemantauan ke database. Pesan: ${errorMessage}`);
+    console.error("[monitoringService] Error adding monitoring session: ", errorMessage);
+    throw new Error(`Gagal menambahkan sesi pemantauan. Pesan: ${errorMessage}`);
   }
 }
 
-export async function getMonitoringSessions(userId: string, period: string): Promise<MonitoringSession[]> {
-  if (!userId || !period) {
-    console.warn("[monitoringService] getMonitoringSessions: userId or period is missing.", { userId, period });
+export async function getMonitoringSessions(uprId: string, period: string, userIdForContextValidation?: string): Promise<MonitoringSession[]> {
+  // userIdForContextValidation can be used if you want to further filter by who created them, but UPR context is primary
+  if (!uprId || !period) {
+    console.warn("[monitoringService] getMonitoringSessions: uprId or period is missing.");
     return [];
   }
   try {
     const q = query(
       collection(db, MONITORING_SESSIONS_COLLECTION),
-      where("userId", "==", userId),
-      where("period", "==", period), // Menyaring berdasarkan periode aplikasi
-      orderBy("endDate", "desc") // Menampilkan yang terbaru di atas
+      where("uprId", "==", uprId), // Filter by uprId
+      where("period", "==", period), 
+      orderBy("endDate", "desc") 
     );
     const querySnapshot = await getDocs(q);
     const sessions: MonitoringSession[] = [];
@@ -95,7 +119,8 @@ export async function getMonitoringSessions(userId: string, period: string): Pro
 
       sessions.push({ 
         id: docSnap.id,
-        userId: data.userId,
+        uprId: data.uprId,
+        userId: data.userId, // User who created this session
         period: data.period,
         name: data.name,
         startDate,
@@ -109,21 +134,19 @@ export async function getMonitoringSessions(userId: string, period: string): Pro
     return sessions;
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error("[monitoringService] Error getting monitoring sessions from Firestore: ", error.code, errorMessage);
+    console.error("[monitoringService] Error getting monitoring sessions: ", error.code, errorMessage);
     let detailedErrorMessage = "Gagal mengambil daftar sesi pemantauan.";
     if (error.code === 'failed-precondition') {
-        detailedErrorMessage += " Ini mungkin karena indeks komposit yang hilang. Periksa Firebase Console (Firestore Database > Indexes) dan buat indeks yang disarankan jika ada.";
-    } else {
-      detailedErrorMessage += ` Pesan: ${errorMessage}`;
+        detailedErrorMessage += " Indeks komposit mungkin hilang. Periksa Firebase Console.";
     }
     throw new Error(detailedErrorMessage);
   }
 }
 
-export async function getMonitoringSessionById(sessionId: string, userId: string, period: string): Promise<MonitoringSession | null> {
-  if (!sessionId || !userId || !period) {
-    console.error("[monitoringService] getMonitoringSessionById: One or more required IDs are missing.", { sessionId, userId, period });
-    throw new Error(`ID Sesi ${sessionId}, User ID${userId}, dan Periode ${period} wajib diisi.`);
+export async function getMonitoringSessionById(sessionId: string, uprId: string, period: string): Promise<MonitoringSession | null> {
+  if (!sessionId || !uprId || !period) {
+    console.error("[monitoringService] getMonitoringSessionById: One or more required IDs are missing.");
+    throw new Error(`ID Sesi, UPR ID, dan Periode wajib diisi.`);
   }
   try {
     const docRef = doc(db, MONITORING_SESSIONS_COLLECTION, sessionId);
@@ -131,8 +154,8 @@ export async function getMonitoringSessionById(sessionId: string, userId: string
 
     if (docSnap.exists()) {
       const data = docSnap.data();
-      if (data.userId !== userId || data.period !== period) {
-        console.warn(`[monitoringService] MonitoringSession ${sessionId} found, but context mismatch. Expected User: ${userId}, Period: ${period}. Found: User: ${data.userId}, Period: ${data.period}`);
+      if (data.uprId !== uprId || data.period !== period) {
+        console.warn(`[monitoringService] MonitoringSession ${sessionId} found, but context mismatch.`);
         return null;
       }
       const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : new Date().toISOString();
@@ -143,6 +166,7 @@ export async function getMonitoringSessionById(sessionId: string, userId: string
       return {
         id: docSnap.id,
         ...data,
+        uprId: data.uprId,
         startDate,
         endDate,
         createdAt,
@@ -161,6 +185,7 @@ export async function getMonitoringSessionById(sessionId: string, userId: string
 
 
 export async function updateMonitoringSessionStatus(sessionId: string, status: MonitoringSessionStatus): Promise<void> {
+  // uprId and period context for update validation can be added if needed by fetching doc first
   if (!sessionId) {
     throw new Error("ID Sesi wajib diisi untuk memperbarui status.");
   }
@@ -172,42 +197,43 @@ export async function updateMonitoringSessionStatus(sessionId: string, status: M
     });
   } catch (error: any) {
     const errorMessage = error.message || String(error);
-    console.error(`[monitoringService] Error updating monitoring session status for ID ${sessionId}: `, errorMessage);
+    console.error(`[monitoringService] Error updating status for session ID ${sessionId}: `, errorMessage);
     throw new Error(`Gagal memperbarui status sesi pemantauan. Pesan: ${errorMessage}`);
   }
 }
 
-export async function deleteMonitoringSession(sessionId: string, userId: string, period: string): Promise<void> {
-  if (!sessionId || !userId || !period) {
-    throw new Error("ID Sesi, User ID, dan Periode aplikasi wajib diisi untuk menghapus sesi.");
+export async function deleteMonitoringSession(sessionId: string, uprId: string, period: string): Promise<void> {
+  // userId (creator) is not strictly needed for deletion if uprId/period is the main context.
+  if (!sessionId || !uprId || !period) {
+    throw new Error("ID Sesi, UPR ID, dan Periode aplikasi wajib diisi.");
   }
-  console.log(`[monitoringService] Attempting to delete MonitoringSession: ${sessionId} for user: ${userId}, period: ${period}`);
+  console.log(`[monitoringService] Attempting to delete MonitoringSession: ${sessionId} for UPR: ${uprId}, Period: ${period}`);
   const sessionDocRef = doc(db, MONITORING_SESSIONS_COLLECTION, sessionId);
   const batch = writeBatch(db);
 
   try {
-    // Verifikasi kepemilikan dan konteks sebelum menghapus
     const sessionDocSnap = await getDoc(sessionDocRef);
     if (!sessionDocSnap.exists()) {
       console.warn(`[monitoringService] MonitoringSession ${sessionId} not found for deletion.`);
-      return; // Sesi tidak ada, tidak perlu dihapus
+      return; 
     }
     const sessionData = sessionDocSnap.data();
-    if (sessionData.userId !== userId || sessionData.period !== period) {
-      console.error(`[monitoringService] Attempt to delete MonitoringSession ${sessionId} denied: context mismatch.`);
-      throw new Error("Operasi tidak diizinkan: sesi pemantauan tidak cocok dengan konteks pengguna/periode.");
+    if (sessionData.uprId !== uprId || sessionData.period !== period) {
+      console.error(`[monitoringService] Deletion denied for session ${sessionId}: context mismatch.`);
+      throw new Error("Operasi tidak diizinkan: sesi tidak cocok dengan konteks UPR/periode.");
     }
 
-    // Hapus semua RiskExposures terkait dengan sesi ini
-    await deleteRiskExposuresByMonitoringSession(sessionId, userId, period, batch);
-    console.log(`[monitoringService] Related RiskExposures for session ${sessionId} added to batch for deletion.`);
+    await deleteRiskExposuresByMonitoringSession(sessionId, uprId, period, batch);
+    console.log(`[monitoringService] Related RiskExposures for session ${sessionId} added to batch.`);
+    
+    await deleteMonitoredControlMeasuresBySession(sessionId, uprId, period, batch);
+    console.log(`[monitoringService] Related MonitoredControlMeasuresData for session ${sessionId} added to batch.`);
 
-    // Hapus dokumen MonitoringSession itu sendiri
     batch.delete(sessionDocRef);
-    console.log(`[monitoringService] MonitoringSession ${sessionId} added to batch for deletion.`);
+    console.log(`[monitoringService] MonitoringSession ${sessionId} added to batch.`);
 
     await batch.commit();
-    console.log(`[monitoringService] Successfully deleted MonitoringSession ${sessionId} and its related RiskExposures.`);
+    console.log(`[monitoringService] Successfully deleted MonitoringSession ${sessionId} and related data.`);
   } catch (error: any) {
     const errorMessage = error.message || String(error);
     console.error(`[monitoringService] Error deleting monitoring session ${sessionId}: `, errorMessage);
