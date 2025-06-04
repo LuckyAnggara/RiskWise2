@@ -37,37 +37,37 @@ export const RISK_CATEGORIES = [
 export type RiskCategory = typeof RISK_CATEGORIES[number];
 
 export const RISK_SCORE_HEATMAP: Record<number, Record<number, number>> = {
-  1: { 1: 1,  2: 3,  3: 5,  4: 8,  5: 20 }, 
-  2: { 1: 2,  2: 7,  3: 11, 4: 13, 5: 21 }, 
-  3: { 1: 4,  2: 10, 3: 14, 4: 17, 5: 22 }, 
-  4: { 1: 6,  2: 12, 3: 16, 4: 19, 5: 24 }, 
-  5: { 1: 9,  2: 15, 3: 18, 4: 23, 5: 25 }, 
+  1: { 1: 1,  2: 3,  3: 5,  4: 8,  5: 20 },
+  2: { 1: 2,  2: 7,  3: 11, 4: 13, 5: 21 },
+  3: { 1: 4,  2: 10, 3: 14, 4: 17, 5: 22 },
+  4: { 1: 6,  2: 12, 3: 16, 4: 19, 5: 24 },
+  5: { 1: 9,  2: 15, 3: 18, 4: 23, 5: 25 },
 };
 
 export const getCalculatedRiskLevel = (likelihood: LikelihoodLevelDesc | null, impact: ImpactLevelDesc | null): { level: CalculatedRiskLevelCategory | 'N/A'; score: number | null } => {
   if (!likelihood || !impact) return { level: 'N/A', score: null };
-  
+
   const likelihoodValue = LIKELIHOOD_LEVELS_DESC_MAP[likelihood];
   const impactValue = IMPACT_LEVELS_DESC_MAP[impact];
 
   if (likelihoodValue === undefined || impactValue === undefined) {
     return { level: 'N/A', score: null };
   }
-  
+
   const score = RISK_SCORE_HEATMAP[likelihoodValue]?.[impactValue] ?? null;
 
   if (score === null) {
-    return { level: 'N/A', score }; 
+    return { level: 'N/A', score };
   }
 
   let level: CalculatedRiskLevelCategory;
   if (score >= 20 && score <= 25) level = 'Sangat Tinggi';
-  else if (score >= 16 && score <= 19) level = 'Tinggi';   
-  else if (score >= 12 && score <= 15) level = 'Sedang';   
-  else if (score >= 6 && score <= 11) level = 'Rendah';    
+  else if (score >= 16 && score <= 19) level = 'Tinggi';
+  else if (score >= 12 && score <= 15) level = 'Sedang';
+  else if (score >= 6 && score <= 11) level = 'Rendah';
   else if (score >= 1 && score <= 5) level = 'Sangat Rendah';
   else {
-    return { level: 'N/A', score }; 
+    return { level: 'N/A', score };
   }
   return { level, score };
 };
@@ -77,7 +77,7 @@ export const getRiskLevelColor = (level: CalculatedRiskLevelCategory | 'N/A') =>
     case 'sangat tinggi': return 'bg-red-600 hover:bg-red-700 text-white';
     case 'tinggi': return 'bg-orange-500 hover:bg-orange-600 text-white';
     case 'sedang': return 'bg-yellow-400 hover:bg-yellow-500 text-black dark:bg-yellow-500 dark:text-black';
-    case 'rendah': return 'bg-blue-500 hover:bg-blue-600 text-white'; 
+    case 'rendah': return 'bg-blue-500 hover:bg-blue-600 text-white';
     case 'sangat rendah': return 'bg-green-500 hover:bg-green-600 text-white';
     default: return 'bg-gray-400 hover:bg-gray-500 text-white';
   }
@@ -97,7 +97,7 @@ export const getControlGuidance = (riskLevel: CalculatedRiskLevelCategory | 'N/A
       return "Tentukan tingkat risiko penyebab terlebih dahulu untuk mendapatkan panduan pengendalian.";
   }
 };
- 
+
 export const RISK_SOURCES = ['Internal', 'Eksternal'] as const;
 export type RiskSource = typeof RISK_SOURCES[number];
 
@@ -110,100 +110,100 @@ export type ControlMeasureTypeKey = keyof typeof CONTROL_MEASURE_TYPES;
 export const CONTROL_MEASURE_TYPE_KEYS = Object.keys(CONTROL_MEASURE_TYPES) as ControlMeasureTypeKey[];
 
 export interface UPR {
-  id: string;
-  name: string;
-  code: string; // Unique short code for the UPR
+  id: string; // Firestore document ID
+  name: string; // e.g., "Inspektorat Jenderal Kementerian X"
+  code: string; // e.g., "ITJEN"
   description?: string;
-  adminUserIds: string[]; // UIDs of users who can administer this UPR
-  memberUserIds: string[]; // UIDs of users who are members of this UPR
+  adminUserIds: string[]; // Firebase UIDs of users who can administer this UPR
+  memberUserIds: string[]; // Firebase UIDs of users who are members of this UPR
   createdAt: string;
   updatedAt?: string;
 }
 
 export interface Goal {
   id: string;
-  uprId: string; // ID of the UPR this goal belongs to
+  uprId: string; // ID of the UPR (from UPRs collection) this goal belongs to
   name: string;
   description: string;
-  code: string; 
+  code: string;
   userId: string; // UID of the user who created/last modified this
-  period: string; 
-  createdAt: string; 
-  updatedAt?: string; 
+  period: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface PotentialRisk {
   id: string;
-  uprId: string; 
+  uprId: string; // ID of the UPR (from UPRs collection)
   goalId: string;
-  userId: string; 
-  period: string; 
-  sequenceNumber: number; 
+  userId: string;
+  period: string;
+  sequenceNumber: number;
   description: string;
   category: RiskCategory | null;
   owner: string | null;
-  identifiedAt: string; 
-  updatedAt?: string; 
+  identifiedAt: string;
+  updatedAt?: string;
 }
 
 export interface RiskCause {
   id: string;
-  uprId: string; 
+  uprId: string; // ID of the UPR (from UPRs collection)
   potentialRiskId: string;
-  goalId: string; 
-  userId: string; 
-  period: string; 
-  sequenceNumber: number; 
+  goalId: string;
+  userId: string;
+  period: string;
+  sequenceNumber: number;
   description: string;
   source: RiskSource;
   keyRiskIndicator: string | null;
-  riskTolerance: string | null; 
+  riskTolerance: string | null;
   likelihood: LikelihoodLevelDesc | null;
   impact: ImpactLevelDesc | null;
-  createdAt: string; 
-  analysisUpdatedAt?: string; 
-  potentialRiskCode?: string; 
-  riskCauseCode?: string; 
+  createdAt: string;
+  analysisUpdatedAt?: string;
+  potentialRiskCode?: string;
+  riskCauseCode?: string;
 }
 
 export interface ControlMeasure {
   id: string;
-  uprId: string; 
+  uprId: string; // ID of the UPR (from UPRs collection)
   riskCauseId: string;
-  potentialRiskId: string; 
-  goalId: string; 
-  userId: string; 
-  period: string; 
+  potentialRiskId: string;
+  goalId: string;
+  userId: string;
+  period: string;
   controlType: ControlMeasureTypeKey;
-  sequenceNumber: number; 
+  sequenceNumber: number;
   description: string;
   keyControlIndicator: string | null;
   target: string | null;
   responsiblePerson: string | null;
-  deadline: string | null; 
+  deadline: string | null;
   budget: number | null;
-  createdAt: string; 
-  updatedAt?: string; 
+  createdAt: string;
+  updatedAt?: string;
 }
 
 
 export type UserRole = 'admin' | 'auditor' | 'userSatker';
 
 export interface AppUser {
-  uid: string;
+  uid: string; // Firebase Auth UID
   email: string | null;
-  displayName: string | null; 
+  displayName: string | null; // User's preferred display name
   photoURL: string | null;
   role: UserRole;
-  assignedUprId: string | null; // ID of the UPR this user is assigned to (if role is userSatker)
+  uprId: string | null; // ID of the UPR (from UPRs collection) this user is currently associated with
   activePeriod: string | null;
   availablePeriods: string[] | null;
-  riskAppetite?: number | null; 
+  riskAppetite?: number | null;
   monitoringSettings?: {
     defaultFrequency?: MonitoringPeriodFrequency | null;
   } | null;
-  createdAt: string; 
-  updatedAt?: string; 
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export const getControlTypeName = (typeKey: ControlMeasureTypeKey | null | undefined): string => {
@@ -218,60 +218,60 @@ export type MonitoringSessionStatus = 'Direncanakan' | 'Aktif' | 'Selesai';
 
 export interface MonitoringSession {
   id: string;
-  uprId: string; // UPR context for this session
+  uprId: string; // UPR ID context for this session
   userId: string; // User who created the session
   period: string; // Application period when the session was created/is relevant for
-  name: string; 
-  startDate: string; 
-  endDate: string; 
-  riskCauseIdsToMonitor: string[]; 
+  name: string;
+  startDate: string;
+  endDate: string;
+  riskCauseIdsToMonitor: string[];
   status: MonitoringSessionStatus;
-  createdAt: string; 
-  updatedAt?: string; 
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface RiskExposure {
-  id: string; 
-  uprId: string;
+  id: string;
+  uprId: string; // UPR ID
   monitoringSessionId: string;
   riskCauseId: string;
   userId: string; // User who recorded this exposure
   period: string; // Application period
-  exposureValue: number | null; 
+  exposureValue: number | null;
   exposureNotes: string | null;
   isToleranceNegative?: boolean | null;
-  recordedAt: string; 
-  updatedAt?: string; 
+  recordedAt: string;
+  updatedAt?: string;
 }
 
 export interface MonitoredRiskCauseView extends RiskCause {
   potentialRiskDescription: string;
   goalCode: string;
-  potentialRiskCode: string; 
-  riskCauseCode: string; 
-  riskExposure?: RiskExposure | null; 
+  potentialRiskCode: string;
+  riskCauseCode: string;
+  riskExposure?: RiskExposure | null;
 }
 
 export interface MonitoredControlMeasureData {
-  id: string; 
-  uprId: string;
-  monitoringSessionId: string; 
-  riskCauseId: string; 
-  controlMeasureId: string; 
+  id: string;
+  uprId: string; // UPR ID
+  monitoringSessionId: string;
+  riskCauseId: string;
+  controlMeasureId: string;
   userId: string; // User who recorded this data
   period: string; // Application period
   realizationKCI: string | null;
   isTargetNegative: boolean | null;
   controlPerformance: number | null;
   controlActivityNarrative: string | null;
-  supportingDocumentUrl: string | null; 
-  recordedAt: string; 
-  updatedAt?: string; 
+  supportingDocumentUrl: string | null;
+  recordedAt: string;
+  updatedAt?: string;
 }
 
 export interface FlatReportItem {
-  uprCode?: string; // Added
-  uprName?: string; // Added
+  uprCode?: string;
+  uprName?: string;
   goalCode?: string;
   goalName?: string;
   goalDescription?: string;
@@ -304,3 +304,5 @@ export interface FlatReportItem {
   controlMeasureDeadline?: string | null;
   controlMeasureBudget?: number | null;
 }
+
+    

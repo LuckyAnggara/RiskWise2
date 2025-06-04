@@ -11,8 +11,8 @@ import type { AppUser } from '@/lib/types';
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   appUser: AppUser | null;
-  authContextLoading: boolean; 
-  profileLoading: boolean; 
+  authContextLoading: boolean;
+  profileLoading: boolean;
   isProfileComplete: boolean;
   refreshAppUser: () => Promise<void>;
 }
@@ -38,24 +38,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("[AuthContext] fetchAppUser: AppUser data from Firestore for UID", user.uid, ":", JSON.stringify(userDoc));
         if (userDoc) {
           setAppUser(userDoc);
-          let profileIsConsideredComplete = !!(
+          // isProfileComplete now heavily depends on uprId being assigned (for userSatker)
+          // and other core profile fields.
+          const profileIsConsideredComplete = !!(
             userDoc.displayName &&
+            userDoc.uprId && // uprId (Firestore doc ID) must exist
             userDoc.activePeriod &&
             userDoc.availablePeriods &&
-            userDoc.availablePeriods.length > 0 &&
-            userDoc.uprId // uprId disinkronkan dengan displayName, jadi jika displayName ada, uprId juga ada
+            userDoc.availablePeriods.length > 0
+            // Role 'userSatker' doesn't need assignedUprId anymore if uprId itself is the assignment.
           );
-
-          // Untuk 'userSatker', pastikan juga assignedUprId ada jika UPR terpisah benar-benar diimplementasikan
-          // Untuk saat ini, karena uprId = displayName, logika di atas cukup.
-          // if (userDoc.role === 'userSatker') {
-          //   profileIsConsideredComplete = profileIsConsideredComplete && !!userDoc.assignedUprId;
-          // }
-          
           setIsProfileComplete(profileIsConsideredComplete);
-          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete);
+          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Based on UPR ID:", userDoc.uprId);
         } else {
-          setAppUser(null); 
+          setAppUser(null);
           setIsProfileComplete(false);
           console.log("[AuthContext] fetchAppUser: No Firestore doc, profile set to incomplete for UID:", user.uid);
         }
@@ -72,17 +68,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("[AuthContext] fetchAppUser: No Firebase user, setting appUser to null and profile states. Setting profileLoadingInternal to false.");
       setAppUser(null);
       setIsProfileComplete(false);
-      setProfileLoadingInternal(false); 
+      setProfileLoadingInternal(false);
     }
   }, []);
 
   useEffect(() => {
     console.log("[AuthContext] onAuthStateChanged listener attaching.");
-    setAuthLoadingInternal(true); 
+    setAuthLoadingInternal(true);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log("[AuthContext] onAuthStateChanged: Firebase user state is:", user ? user.uid : "null");
       setCurrentUser(user);
-      
       try {
         await fetchAppUser(user);
       } catch (error) {
@@ -102,21 +97,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAppUser = useCallback(async () => {
     if (currentUser) {
       console.log(`[AuthContext] refreshAppUser called for UID: ${currentUser.uid}. Triggering fetchAppUser.`);
-      await fetchAppUser(currentUser); 
+      await fetchAppUser(currentUser);
     } else {
       console.log("[AuthContext] refreshAppUser: No current user. Calling fetchAppUser(null).");
       await fetchAppUser(null);
     }
   }, [currentUser, fetchAppUser]);
-  
+
   return (
-    <AuthContext.Provider value={{ 
-        currentUser, 
-        appUser, 
-        authContextLoading: authLoadingInternal, 
-        profileLoading: profileLoadingInternal, 
-        isProfileComplete, 
-        refreshAppUser 
+    <AuthContext.Provider value={{
+        currentUser,
+        appUser,
+        authContextLoading: authLoadingInternal,
+        profileLoading: profileLoadingInternal,
+        isProfileComplete,
+        refreshAppUser
     }}>
       {children}
     </AuthContext.Provider>

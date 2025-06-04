@@ -41,16 +41,17 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
       const updatedAt = data.updatedAt instanceof Timestamp
                         ? data.updatedAt.toDate().toISOString()
                         : (typeof data.updatedAt === 'string' ? data.updatedAt : undefined);
-      
+
       return {
-        uid: data.uid,
+        uid: data.uid, // Ensure uid is directly from data if stored, or use passed uid
         email: data.email || null,
         displayName: data.displayName || null,
         photoURL: data.photoURL || null,
-        role: data.role || 'userSatker',
-        uprId: data.uprId || null,
+        role: data.role || 'userSatker', // Default role
+        uprId: data.uprId || null, // This will be the ID of the UPR document
         activePeriod: data.activePeriod || null,
         availablePeriods: Array.isArray(data.availablePeriods) ? data.availablePeriods : null,
+        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
         createdAt,
         updatedAt,
       } as AppUser;
@@ -64,11 +65,9 @@ export async function getUserDocument(uid: string): Promise<AppUser | null> {
   }
 }
 
-// Fungsi ini sekarang utama untuk membuat ATAU memperbarui profil pengguna,
-// terutama dipanggil dari halaman Pengaturan.
 export async function updateUserProfileData(
   uid: string,
-  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods">>
+  data: Partial<Pick<AppUser, "displayName" | "photoURL" | "activePeriod" | "availablePeriods" | "riskAppetite" | "uprId">> // Allow uprId to be passed for admin updates
 ): Promise<void> {
   if (!uid) throw new Error("UID pengguna diperlukan untuk memperbarui profil.");
   console.log(`[userService] updateUserProfileData: Called for UID: ${uid} with data:`, JSON.stringify(data));
@@ -77,25 +76,16 @@ export async function updateUserProfileData(
   const updates: Partial<AppUser> & { updatedAt?: any, createdAt?: any } = {};
   let isCreatingNewDocument = false;
 
-  // Tentukan field yang akan diupdate atau dibuat
-  if (data.displayName !== undefined) {
-    updates.displayName = data.displayName || null;
-    updates.uprId = data.displayName || null; // Sinkronkan uprId dengan displayName
-  }
-  if (data.photoURL !== undefined) {
-    updates.photoURL = data.photoURL || null;
-  }
-  if (data.activePeriod !== undefined) {
-    updates.activePeriod = data.activePeriod || null;
-  }
-  if (data.availablePeriods !== undefined) {
-    updates.availablePeriods = Array.isArray(data.availablePeriods) ? data.availablePeriods : [];
-  }
+  if (data.displayName !== undefined) updates.displayName = data.displayName || null;
+  if (data.photoURL !== undefined) updates.photoURL = data.photoURL || null;
+  if (data.activePeriod !== undefined) updates.activePeriod = data.activePeriod || null;
+  if (data.availablePeriods !== undefined) updates.availablePeriods = Array.isArray(data.availablePeriods) ? data.availablePeriods : [];
+  if (data.riskAppetite !== undefined) updates.riskAppetite = data.riskAppetite;
+  if (data.uprId !== undefined) updates.uprId = data.uprId; // Allow setting uprId if provided (e.g., by admin)
 
   try {
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
-      // Dokumen sudah ada, lakukan update
       if (Object.keys(updates).length > 0) {
         updates.updatedAt = serverTimestamp();
         console.log('[userService] updateUserProfileData: Updating existing user document with:', JSON.stringify(updates));
@@ -105,30 +95,28 @@ export async function updateUserProfileData(
         console.log('[userService] updateUserProfileData: No changes to update for UID:', uid);
       }
     } else {
-      // Dokumen belum ada, buat baru (ini terjadi saat pengguna melengkapi profil pertama kali)
       isCreatingNewDocument = true;
-      const firebaseUser = { uid, email: data.email } as FirebaseUser; // Dapatkan email dari currentUser jika ada
-      
       const authUser = (await import('firebase/auth')).getAuth().currentUser;
       const userEmail = authUser?.email || null;
 
-
+      // For new documents, certain fields need defaults if not provided in `data`
       const createData: AppUser = {
         uid,
-        email: userEmail, // Perlu cara untuk mendapatkan email pengguna saat ini
-        role: 'userSatker', // Default role
-        displayName: data.displayName || null,
-        uprId: data.displayName || null,
+        email: userEmail,
+        role: 'userSatker', // Default role for new users
+        displayName: data.displayName || "Pengguna Baru",
+        uprId: data.uprId || null, // uprId will be null until assigned by admin
         photoURL: data.photoURL || null,
         activePeriod: data.activePeriod || DEFAULT_INITIAL_PERIOD,
-        availablePeriods: data.availablePeriods || [...DEFAULT_AVAILABLE_PERIODS],
-        createdAt: new Date().toISOString(), // Placeholder, akan di-override serverTimestamp
-        // updatedAt tidak di-set saat create
+        availablePeriods: data.availablePeriods && data.availablePeriods.length > 0 ? data.availablePeriods : [...DEFAULT_AVAILABLE_PERIODS],
+        riskAppetite: data.riskAppetite === undefined ? null : data.riskAppetite,
+        createdAt: new Date().toISOString(), // Placeholder, will be overridden by serverTimestamp
       };
-      updates.createdAt = serverTimestamp(); // Untuk field createdAt saat buat baru
       
-      console.log('[userService] updateUserProfileData: Creating new user document with:', JSON.stringify({ ...createData, ...updates }));
-      await setDoc(userDocRef, { ...createData, ...updates });
+      const finalCreateData = { ...createData, ...updates, createdAt: serverTimestamp() };
+      
+      console.log('[userService] updateUserProfileData: Creating new user document with:', JSON.stringify(finalCreateData));
+      await setDoc(userDocRef, finalCreateData);
       console.log('[userService] updateUserProfileData: New user document created successfully for UID:', uid);
     }
   } catch (error: any) {
@@ -137,3 +125,5 @@ export async function updateUserProfileData(
     throw new Error(`Gagal memperbarui/membuat data profil pengguna: ${errorMessage}`);
   }
 }
+
+    
