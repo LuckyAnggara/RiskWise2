@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, Save, ArrowLeft, Users } from 'lucide-react';
+import { Loader2, Save, ArrowLeft, Users, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { addUpr, getUprById, updateUpr } from '@/services/uprService';
 import type { UPR, AppUser } from '@/lib/types';
@@ -43,6 +43,7 @@ export default function ManageSingleUprPage() {
   const [allUsers, setAllUsers] = useState<AppUser[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [initialUserAssignmentsLoaded, setInitialUserAssignmentsLoaded] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
 
 
   const {
@@ -70,7 +71,7 @@ export default function ManageSingleUprPage() {
             code: uprData.code,
             description: uprData.description || "",
           });
-          // Pre-select users assigned to this UPR
+          
           const assignedUsers = new Set<string>();
           users.forEach(user => {
             if (user.uprId === uprIdParam) {
@@ -84,7 +85,7 @@ export default function ManageSingleUprPage() {
           router.push('/admin/uprs');
         }
       } else {
-         setInitialUserAssignmentsLoaded(true); // For new UPR, no users are pre-assigned
+         setInitialUserAssignmentsLoaded(true); 
       }
     } catch (error: any) {
       toast({ title: "Error Memuat Data", description: error.message, variant: "destructive" });
@@ -120,7 +121,7 @@ export default function ManageSingleUprPage() {
           code: data.code,
           description: data.description || null,
         });
-        currentUprId = newUpr.id; // Get ID of the newly created UPR
+        currentUprId = newUpr.id; 
         toast({ title: "UPR Dibuat", description: `UPR "${data.name}" telah berhasil dibuat.` });
       } else {
         await updateUpr(uprIdParam, {
@@ -131,17 +132,17 @@ export default function ManageSingleUprPage() {
         toast({ title: "UPR Diperbarui", description: `UPR "${data.name}" telah berhasil diperbarui.` });
       }
 
-      // Handle user assignments
+      
       for (const user of allUsers) {
         const isSelected = selectedUserIds.has(user.uid);
         const currentUprAssignment = user.uprId;
 
         if (isSelected && currentUprAssignment !== currentUprId) {
-          // Assign user to this UPR
+          
           await updateUserProfileData(user.uid, { uprId: currentUprId });
           toast({ title: "Pengguna Di-assign", description: `Pengguna ${user.displayName || user.email} di-assign ke UPR ${data.name}.`, duration: 2000 });
         } else if (!isSelected && currentUprAssignment === currentUprId) {
-          // Unassign user from this UPR (set uprId to null)
+          
           await updateUserProfileData(user.uid, { uprId: null });
            toast({ title: "Pengguna Di-unassign", description: `Pengguna ${user.displayName || user.email} di-unassign dari UPR ${data.name}.`, variant: "default", duration: 2000 });
         }
@@ -153,6 +154,17 @@ export default function ManageSingleUprPage() {
       toast({ title: "Gagal Menyimpan UPR atau Assignment", description: error.message, variant: "destructive" });
     }
   };
+
+  const filteredUsers = useMemo(() => {
+    if (!userSearchTerm) {
+      return allUsers;
+    }
+    const lowerSearchTerm = userSearchTerm.toLowerCase();
+    return allUsers.filter(user =>
+      (user.displayName && user.displayName.toLowerCase().includes(lowerSearchTerm)) ||
+      (user.email && user.email.toLowerCase().includes(lowerSearchTerm))
+    );
+  }, [allUsers, userSearchTerm]);
   
   if (!isAdmin && !isLoadingPage) {
     return <p className="text-destructive">Akses ditolak. Hanya admin yang dapat mengakses halaman ini.</p>;
@@ -226,13 +238,27 @@ export default function ManageSingleUprPage() {
             <CardTitle className="flex items-center"><Users className="mr-2 h-5 w-5 text-primary" /> Pengguna Terhubung</CardTitle>
             <CardDescription>Pilih pengguna yang akan di-assign ke UPR ini. Pengguna yang sudah terhubung akan otomatis tercentang.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Cari pengguna berdasarkan nama atau email..."
+                className="pl-10 w-full"
+                value={userSearchTerm}
+                onChange={(e) => setUserSearchTerm(e.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+
             {allUsers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Tidak ada pengguna terdaftar di sistem.</p>
+            ) : filteredUsers.length === 0 && userSearchTerm ? (
+                 <p className="text-sm text-muted-foreground">Tidak ada pengguna yang cocok dengan pencarian "{userSearchTerm}".</p>
             ) : (
                 <ScrollArea className="h-[300px] border rounded-md p-4">
                     <div className="space-y-3">
-                    {allUsers.map(user => (
+                    {filteredUsers.map(user => (
                         <div key={user.uid} className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 transition-colors">
                         <Checkbox
                             id={`user-${user.uid}`}
