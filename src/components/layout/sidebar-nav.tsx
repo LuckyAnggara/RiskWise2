@@ -18,7 +18,7 @@ interface NavItem {
   label: string; 
   href: string; 
   icon: React.ElementType;
-  disabled?: boolean;
+  alwaysEnabled?: boolean; // New prop
 }
 
 export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean }) {
@@ -26,22 +26,21 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
   const { openMobile, setOpenMobile } = useSidebar();
   
   const navItems: NavItem[] = [
-    { label: "Dashboard", href: "/", icon: LayoutDashboard, disabled: profileIncomplete },
-    { label: "Sasaran", href: "/goals", icon: Target, disabled: profileIncomplete },
-    { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText, disabled: profileIncomplete }, 
-    { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3, disabled: profileIncomplete }, 
-    { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck, disabled: profileIncomplete },
-    { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity, disabled: profileIncomplete },
-    { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns, disabled: profileIncomplete },
-    { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive, disabled: profileIncomplete },
-    { label: "Pengaturan", href: "/settings", icon: Cog, disabled: false }, 
+    { label: "Dashboard", href: "/", icon: LayoutDashboard },
+    { label: "Sasaran", href: "/goals", icon: Target },
+    { label: "Identifikasi Risiko", href: "/all-risks", icon: FileText }, 
+    { label: "Analisis Risiko", href: "/risk-analysis", icon: BarChart3 }, 
+    { label: "Prioritas Risiko", href: "/risk-priority", icon: ShieldCheck },
+    { label: "Pemantauan & Reviu", href: "/monitoring", icon: Activity },
+    { label: "Analisis Komparatif", href: "/comparative-monitoring", icon: Columns },
+    { label: "Laporan Dokumen Risiko", href: "/risk-document", icon: FileArchive },
+    { label: "Pengaturan", href: "/settings", icon: Cog, alwaysEnabled: true }, // Settings always enabled
   ];
   
   const isActive = (navHref: string) => {
     if (navHref === "/") {
       return pathname === "/";
     }
-    // For /risk-document, ensure exact match or startsWith if there are sub-pages
     if (navHref === "/risk-document") {
         return pathname === navHref || pathname.startsWith(navHref + "/");
     }
@@ -52,27 +51,32 @@ export function SidebarNav({ profileIncomplete }: { profileIncomplete?: boolean 
     <SidebarMenu>
       <SidebarGroup>
         <SidebarGroupLabel>Menu</SidebarGroupLabel>
-        {navItems.map((item) => (
-          <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior={item.disabled ? undefined : false}>
-              <SidebarMenuButton
-                as={item.disabled ? "button" : "a"}
-                isActive={!item.disabled && isActive(item.href)}
-                onClick={() => {
-                  if (openMobile) setOpenMobile(false);
-                  if (item.disabled) {
-                    // console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap atau data belum siap.`);
-                  }
-                }}
-                disabled={item.disabled}
-                className={cn(item.disabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-foreground")}
-              >
-                <item.icon className="h-5 w-5" />
-                <span>{item.label}</span>
-              </SidebarMenuButton>
-            </Link>
-          </SidebarMenuItem>
-        ))}
+        {navItems.map((item) => {
+          const isDisabled = profileIncomplete && !item.alwaysEnabled;
+          return (
+            <SidebarMenuItem key={item.href}>
+              <Link href={isDisabled ? "#" : item.href} passHref legacyBehavior={isDisabled ? undefined : false}>
+                <SidebarMenuButton
+                  as={isDisabled ? "button" : "a"}
+                  isActive={!isDisabled && isActive(item.href)}
+                  onClick={() => {
+                    if (openMobile && !isDisabled) setOpenMobile(false);
+                    if (isDisabled) {
+                      // console.log(`Menu ${item.label} dinonaktifkan karena profil belum lengkap.`);
+                    }
+                  }}
+                  disabled={isDisabled}
+                  className={cn(isDisabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-foreground")}
+                  aria-disabled={isDisabled}
+                  tabIndex={isDisabled ? -1 : undefined}
+                >
+                  <item.icon className="h-5 w-5" />
+                  <span>{item.label}</span>
+                </SidebarMenuButton>
+              </Link>
+            </SidebarMenuItem>
+          );
+        })}
       </SidebarGroup>
     </SidebarMenu>
   );

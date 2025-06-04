@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [authLoadingInternal, setAuthLoadingInternal] = useState(true);
-  const [profileLoadingInternal, setProfileLoadingInternal] = useState(true); // Default to true, as profile fetch is expected
+  const [profileLoadingInternal, setProfileLoadingInternal] = useState(true);
   const [isProfileComplete, setIsProfileComplete] = useState(false);
 
   const fetchAppUser = useCallback(async (user: FirebaseUser | null) => {
@@ -43,15 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             userDoc.activePeriod &&
             userDoc.availablePeriods &&
             userDoc.availablePeriods.length > 0 &&
-            userDoc.uprId 
+            userDoc.uprId // uprId disinkronkan dengan displayName, jadi jika displayName ada, uprId juga ada
           );
 
-          if (userDoc.role === 'userSatker') {
-            profileIsConsideredComplete = profileIsConsideredComplete && !!userDoc.assignedUprId;
-          }
+          // Untuk 'userSatker', pastikan juga assignedUprId ada jika UPR terpisah benar-benar diimplementasikan
+          // Untuk saat ini, karena uprId = displayName, logika di atas cukup.
+          // if (userDoc.role === 'userSatker') {
+          //   profileIsConsideredComplete = profileIsConsideredComplete && !!userDoc.assignedUprId;
+          // }
           
           setIsProfileComplete(profileIsConsideredComplete);
-          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete, "Role:", userDoc.role, "AssignedUPR:", userDoc.assignedUprId);
+          console.log("[AuthContext] fetchAppUser: Profile complete status for UID", user.uid, ":", profileIsConsideredComplete);
         } else {
           setAppUser(null); 
           setIsProfileComplete(false);
@@ -76,7 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("[AuthContext] onAuthStateChanged listener attaching.");
-    console.log("[AuthContext] Initial: authLoadingInternal:", authLoadingInternal, "profileLoadingInternal:", profileLoadingInternal);
     setAuthLoadingInternal(true); 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log("[AuthContext] onAuthStateChanged: Firebase user state is:", user ? user.uid : "null");
@@ -129,3 +130,5 @@ export function useAuth() {
   }
   return context;
 }
+
+    
