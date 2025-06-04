@@ -51,8 +51,8 @@ import {
 interface AppState {
   activeUprId: string | null; 
   activePeriod: string | null; 
-  activeUserId: string | null; // UID of the logged-in user (could be auditor or UPR user)
-  dataFetchedForUprPeriod: string | null; // Identifier like "uprId|period"
+  activeUserId: string | null; 
+  dataFetchedForUprPeriod: string | null; 
 
   goals: Goal[];
   goalsLoading: boolean;
@@ -133,16 +133,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAppContext: (uprIdToSet, periodToSet, actualUserId) => {
     console.log(`[AppStore] setAppContext called. New Context: UPR ID=${uprIdToSet}, Period=${periodToSet}, Actual Logged-in User ID=${actualUserId}. Current Store Context UPR|P: ${get().activeUprId}|${get().activePeriod}, Fetched for: ${get().dataFetchedForUprPeriod}`);
     const oldContextIdentifier = get().dataFetchedForUprPeriod;
-    const newContextIdentifier = `${uprIdToSet}|${periodToSet}`; // This identifies the UPR/Period data being viewed
+    const newContextIdentifier = `${uprIdToSet}|${periodToSet}`; 
     
     set({ activeUprId: uprIdToSet, activePeriod: periodToSet, activeUserId: actualUserId });
 
     if (oldContextIdentifier !== newContextIdentifier) {
       console.log(`[AppStore] setAppContext: Context changed OR data not fetched for ${newContextIdentifier}. Triggering global data fetch.`);
       get().resetAllData(); 
-      // For global fetch, ownerIdForDataQuery is the uprId whose data we want.
-      // actualUserId remains the logged-in user for other context if needed.
-      get().triggerGlobalDataFetch(uprIdToSet, periodToSet, uprIdToSet);
+      get().triggerGlobalDataFetch(uprIdToSet, periodToSet, uprIdToSet); // Owner of data is the UPR itself
     } else {
       console.log(`[AppStore] setAppContext: Context same and data already marked as fetched for ${newContextIdentifier}. Not re-fetching.`);
     }
@@ -168,7 +166,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       goals: [], potentialRisks: [], riskCauses: [], controlMeasures: [], monitoringSessions: [], riskExposures: [], monitoredControlMeasuresData: []
     });
     try {
-      // Pass ownerIdForDataQuery as the ID for whose data items are being filtered/fetched from services
       await get().fetchGoals(uprIdToFetchFor, periodToFetchFor, ownerIdForDataQuery);
       console.log(`[AppStore] triggerGlobalDataFetch: Main data fetch sequence (goals) initiated for ${uniqueUprPeriodIdentifier}.`);
     } catch (error) {
@@ -205,18 +202,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     console.log(`[AppStore] fetchGoals: For UPR Data: ${uprIdForDataQuery}, Period: ${periodForDataQuery}, OwnerID: ${ownerIdForDataQuery}`);
     set({ goalsLoading: true });
     try {
-      // Service fetches goals for the UPR whose ID is uprIdForDataQuery
       const result = await getGoalsFromService(uprIdForDataQuery, periodForDataQuery);
       if (result.success && result.goals) {
-        // Filter goals by the uprIdForDataQuery and periodForDataQuery to ensure data consistency
-        // The `userId` field on Goal doc is assumed to be the uprId for data ownership here.
+        // The 'userId' field in Firestore for Goal doc should store the UPR ID that owns this goal.
         const relevantGoals = result.goals.filter(g => g.uprId === uprIdForDataQuery && g.period === periodForDataQuery && g.userId === ownerIdForDataQuery);
         const sortedGoals = relevantGoals.sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' }));
         set({ goals: sortedGoals, goalsLoading: false });
         console.log(`[AppStore] Goals fetched for UPR Data ${uprIdForDataQuery} (owned by ${ownerIdForDataQuery}): ${sortedGoals.length}. Triggering PR & Monitoring Session fetch.`);
         await get().fetchPotentialRisks(uprIdForDataQuery, periodForDataQuery, ownerIdForDataQuery);
-        // Pass activeUserId for monitoring sessions as they might be created by the logged-in user.
-        // The service itself should handle querying sessions for the `uprIdForDataQuery`.
         await get().fetchMonitoringSessions(uprIdForDataQuery, periodForDataQuery, state.activeUserId || ownerIdForDataQuery); 
       } else {
         console.warn(`[AppStore] fetchGoals: Failed to fetch or no goals for UPR Data ${uprIdForDataQuery}. Message: ${result.message}`);
@@ -325,6 +318,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       let allPRs: PotentialRisk[] = [];
       for (const goal of currentGoalsInContext) {
           const prs = await getPotentialRisksByGoalIdFromService(goal.id, uprIdForDataQuery, periodForDataQuery);
+          // The 'userId' field in Firestore for PotentialRisk doc should store the UPR ID that owns this PR.
           allPRs.push(...prs.filter(pr => pr.uprId === uprIdForDataQuery && pr.period === periodForDataQuery && pr.userId === ownerIdForDataQuery)); 
       }
       const sortedPRs = allPRs.sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`));
@@ -344,7 +338,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah potensi risiko.");
     console.log(`[AppStore] addPotentialRiskToStore: Context UPR=${activeUprId}, Period=${activePeriod}, User=${activeUserId}`);
     try {
-      // The actual owner ID for the PR document (userId field) will be activeUprId
+      // For PotentialRisk, `uprId` is the context and `ownerUprId` (passed as 4th arg to service) is activeUprId (owner of the data)
       const newPR = await addPotentialRiskToService(data, goalId, activeUprId, activePeriod, activeUprId, sequenceNumber);
       set(state => ({
         potentialRisks: [...state.potentialRisks, newPR].sort((a,b) => `${a.goalId}-${a.sequenceNumber}`.localeCompare(`${b.goalId}-${b.sequenceNumber}`))
@@ -433,6 +427,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       let allRCs: RiskCause[] = [];
       for (const pr of currentPRsInContext) {
           const rcs = await getRiskCausesByPotentialRiskIdFromService(pr.id, uprIdForDataQuery, periodForDataQuery);
+          // The 'userId' field in Firestore for RiskCause doc should store the UPR ID that owns this RC.
           allRCs.push(...rcs.filter(rc => rc.uprId === uprIdForDataQuery && rc.period === periodForDataQuery && rc.userId === ownerIdForDataQuery));
       }
       const sortedRCs = allRCs.sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
@@ -452,7 +447,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah penyebab risiko.");
     console.log(`[AppStore] addRiskCauseToStore: Context UPR=${activeUprId}, Period=${activePeriod}, User=${activeUserId}`);
     try {
-      // The actual owner ID for the RC document (userId field) will be activeUprId
+      // For RiskCause, uprId is the context, ownerUprId (passed as 5th arg to service) is activeUprId (owner of the data)
       const newRC = await addRiskCauseToService(data, potentialRiskId, goalId, activeUprId, activePeriod, activeUprId, sequenceNumber);
       set(state => ({
         riskCauses: [...state.riskCauses, newRC].sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`))
@@ -481,8 +476,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         }).sort((a,b) => `${a.potentialRiskId}-${a.sequenceNumber}`.localeCompare(`${b.potentialRiskId}-${b.sequenceNumber}`));
         return { riskCauses: newRiskCauses };
       });
-      if(rcForContext && activeUserId){ // If a cause was updated, re-fetch its controls.
-         await get().fetchControlMeasures(rcForContext.uprId, rcForContext.period, rcForContext.userId, riskCauseId); // Pass the UPR ID of the cause for data ownership
+      if(rcForContext && activeUprId && activePeriod && activeUserId){ 
+         await get().fetchControlMeasures(activeUprId, activePeriod, activeUprId, riskCauseId); 
       }
       return rcForContext || null;
     } catch (error) { 
@@ -539,6 +534,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set(current => ({
           controlMeasures: [ 
             ...current.controlMeasures.filter(cm => cm.riskCauseId !== riskCauseId_optional || cm.uprId !== uprIdForDataQuery || cm.period !== periodForDataQuery), 
+             // The 'userId' field in Firestore for ControlMeasure doc should store the UPR ID that owns this CM.
             ...allCMs.filter(cm => cm.uprId === uprIdForDataQuery && cm.period === periodForDataQuery && cm.userId === ownerIdForDataQuery) 
           ].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`)),
         }));
@@ -570,7 +566,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menambah pengendalian.");
     console.log(`[AppStore] addControlMeasureToStore: Context UPR=${activeUprId}, Period=${activePeriod}, User=${activeUserId}`);
     try {
-      // The actual owner ID for the CM document (userId field) will be activeUprId
+      // For ControlMeasure, uprId is the context, ownerUprId (passed as 6th arg to service) is activeUprId (owner of the data)
       const newCM = await addControlMeasureToService(data, riskCauseId, potentialRiskId, goalId, activeUprId, activePeriod, activeUprId, controlType); 
       set(state => ({
         controlMeasures: [...state.controlMeasures, newCM].sort((a, b) => `${a.riskCauseId}-${a.controlType}-${a.sequenceNumber}`.localeCompare(`${b.riskCauseId}-${b.controlType}-${b.sequenceNumber}`))
@@ -611,7 +607,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menghapus pengendalian.");
     console.log(`[AppStore] deleteControlMeasureFromStore ID: ${controlMeasureId} from Context UPR: ${activeUprId}, Period: ${activePeriod}`);
     try {
-      const cmToDelete = get().controlMeasures.find(cm => cm.id === controlMeasureId && cm.uprId === activeUprId && cm.period === activePeriod && cm.userId === activeUprId); // Check owner
+      const cmToDelete = get().controlMeasures.find(cm => cm.id === controlMeasureId && cm.uprId === activeUprId && cm.period === activePeriod && cm.userId === activeUprId);
       if (cmToDelete) {
         await deleteControlMeasureFromService(controlMeasureId);
         set(state => ({
@@ -652,10 +648,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     console.log(`[AppStore] fetchMonitoringSessions: For UPR Data: ${uprIdForDataQuery}, Period: ${periodForDataQuery}, by User: ${actualUserIdInitiating}`);
     set({ monitoringSessionsLoading: true });
     try {
-      const sessions = await getMonitoringSessionsFromService(uprIdForDataQuery, periodForDataQuery);
-      // For Monitoring Sessions, the 'userId' on the session doc IS the creator (actualUserIdInitiating).
-      // However, we are fetching sessions FOR a specific UPR (uprIdForDataQuery).
-      // So, we filter by uprId and period. The userId for creator is also on the doc.
+      const sessions = await getMonitoringSessionsFromService(uprIdForDataQuery, periodForDataQuery, actualUserIdInitiating);
       const sessionsForUpr = sessions.filter(s => s.uprId === uprIdForDataQuery && s.period === periodForDataQuery);
       set({ monitoringSessions: sessionsForUpr, monitoringSessionsLoading: false });
       console.log(`[AppStore] Monitoring sessions fetched for UPR Data ${uprIdForDataQuery}: ${sessionsForUpr.length}.`);
@@ -724,7 +717,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   getMonitoringSessionByIdFromState: (sessionId) => {
     const { activeUprId, activePeriod } = get();
     if (!activeUprId || !activePeriod ) return null;
-    // Find based on activeUprId and activePeriod for the data context
     return get().monitoringSessions.find(s => s.id === sessionId && s.uprId === activeUprId && s.period === activePeriod) || null;
   },
 
@@ -737,7 +729,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     console.log(`[AppStore] fetchRiskExposuresForSession: Session: ${sessionId}, UPR Data: ${uprIdForDataQuery}, Period: ${periodForDataQuery}, by User: ${actualUserIdInitiating}`);
     set({ riskExposuresLoading: true });
     try {
-      const exposures = await getRiskExposuresBySessionFromService(sessionId, uprIdForDataQuery, periodForDataQuery);
+      const exposures = await getRiskExposuresBySessionFromService(sessionId, uprIdForDataQuery, periodForDataQuery, actualUserIdInitiating);
       set(state => ({
         riskExposures: [
           ...state.riskExposures.filter(re => re.monitoringSessionId !== sessionId || re.uprId !== uprIdForDataQuery || re.period !== periodForDataQuery), 
@@ -754,12 +746,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   upsertRiskExposureInState: async (exposureData) => {
-    const { activeUprId, activePeriod, activeUserId } = get(); // Logged-in user context
+    const { activeUprId, activePeriod, activeUserId } = get(); 
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menyimpan paparan risiko.");
     console.log(`[AppStore] upsertRiskExposureInState: RC: ${exposureData.riskCauseId}, Session: ${exposureData.monitoringSessionId}, Context UPR=${activeUprId}, User=${activeUserId}`);
     try {
-      // The service will use activeUprId and activePeriod for the UPR data context.
-      // The userId for the record is activeUserId (logged-in user).
       const upsertedExposureFromService = await upsertRiskExposureToService(exposureData, activeUprId, activePeriod, activeUserId);
       set(state => {
         const index = state.riskExposures.findIndex(
@@ -793,7 +783,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     console.log(`[AppStore] fetchMonitoredControlMeasuresForSession: Session: ${sessionId}, UPR Data: ${uprIdForDataQuery}, Period: ${periodForDataQuery}, by User: ${actualUserIdInitiating}`);
     set({ monitoredControlMeasuresLoading: true });
     try {
-      const mcms = await getMonitoredControlMeasuresBySessionFromService(sessionId, uprIdForDataQuery, periodForDataQuery); 
+      const mcms = await getMonitoredControlMeasuresBySessionFromService(sessionId, uprIdForDataQuery, periodForDataQuery, actualUserIdInitiating); 
       set(state => ({
         monitoredControlMeasuresData: [
           ...state.monitoredControlMeasuresData.filter(mcmd => mcmd.monitoringSessionId !== sessionId || mcmd.uprId !== uprIdForDataQuery || mcmd.period !== periodForDataQuery), 
@@ -810,12 +800,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   upsertMonitoredControlMeasureInState: async (mcmData) => {
-    const { activeUprId, activePeriod, activeUserId } = get(); // Logged-in user context
+    const { activeUprId, activePeriod, activeUserId } = get(); 
     if (!activeUprId || !activePeriod || !activeUserId) throw new Error("Konteks (UPR/Periode/User) tidak aktif di store untuk menyimpan data pemantauan kontrol.");
     console.log(`[AppStore] upsertMonitoredControlMeasureInState: Control: ${mcmData.controlMeasureId}, Session: ${mcmData.monitoringSessionId}, Context UPR=${activeUprId}, User=${activeUserId}`);
     try {
-      // The service will use activeUprId and activePeriod for the UPR data context.
-      // The userId for the record is activeUserId (logged-in user).
       const upsertedMCMFromService = await upsertMonitoredControlMeasureToService(mcmData, activeUprId, activePeriod, activeUserId);
       set(state => {
         const index = state.monitoredControlMeasuresData.findIndex(
@@ -845,9 +833,7 @@ export const triggerGlobalDataFetchForStore = (uprId: string | null, period: str
   if (uprId && period && actualUserId) {
     if (store.dataFetchedForUprPeriod !== `${uprId}|${period}` || store.activeUserId !== actualUserId) {
       console.log(`[triggerGlobalDataFetchForStore] Context different or not yet fetched. New: ${uprId}|${period} by User: ${actualUserId}. Triggering fetch.`);
-      // Pass uprId as the UPR whose data we want (ownerIdForDataQuery), 
-      // and actualUserId as the user initiating the action.
-      store.triggerGlobalDataFetch(uprId, period, uprId); 
+      store.triggerGlobalDataFetch(uprId, period, uprId); // ownerIdForDataQuery is the uprId itself
     } else {
       console.log(`[triggerGlobalDataFetchForStore] Data already fetched/fetching for context ${uprId}|${period} by User: ${actualUserId}. Skipping new fetch.`);
     }
@@ -856,8 +842,5 @@ export const triggerGlobalDataFetchForStore = (uprId: string | null, period: str
     store.resetAllData(); 
   }
 };
-    
-
-    
 
     
