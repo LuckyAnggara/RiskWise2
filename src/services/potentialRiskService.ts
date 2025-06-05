@@ -25,7 +25,7 @@ import {
 import { deleteRiskCauseAndSubCollections } from './riskCauseService';
 
 export async function addPotentialRisk(
-  data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'period' | 'userId' | 'uprId' | 'sequenceNumber' | 'goalId'>,
+  data: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'period' | 'uprId' | 'sequenceNumber' | 'goalId'>,
   goalId: string,
   uprId: string | null, // ID UPR tempat data ini akan berada
   period: string,
@@ -40,11 +40,7 @@ export async function addPotentialRisk(
     console.error("[potentialRiskService] addPotentialRisk: period is invalid.", {period});
     throw new Error("Periode tidak valid untuk menambahkan potensi risiko.");
   }
-  if (!creatorUserId || typeof creatorUserId !== 'string' || creatorUserId.trim() === "") {
-    console.error("[potentialRiskService] addPotentialRisk: creatorUserId (pembuat record) is invalid.", {creatorUserId});
-    throw new Error("Creator User ID (pembuat record) tidak valid untuk menambahkan potensi risiko.");
-  }
-  if (!goalId || typeof goalId !== 'string' || goalId.trim() === "") {
+ if (!goalId || typeof goalId !== 'string' || goalId.trim() === "") {
     console.error("[potentialRiskService] addPotentialRisk: goalId is invalid.", {goalId});
     throw new Error("Goal ID tidak valid untuk menambahkan potensi risiko.");
   }
@@ -54,7 +50,6 @@ export async function addPotentialRisk(
       ...data,
       goalId,
       uprId: uprId,       // UPR tempat data ini berada
-      userId: creatorUserId, // Pengguna yang membuat/memiliki record ini
       period,
       sequenceNumber,
       category: data.category || null,
@@ -75,7 +70,7 @@ export async function addPotentialRisk(
       id: docRef.id,
       goalId,
       uprId: savedData.uprId,
-      userId: savedData.userId,
+      userId: creatorUserId, // Keep userId here if it's needed in the returned object for some reason, but it won't be stored
       period,
       description: data.description,
       category: data.category || null,
@@ -118,7 +113,7 @@ export async function getPotentialRisksByGoalId(goalId: string, uprId: string, p
         id: doc.id, 
         ...data, 
         uprId: data.uprId,
-        userId: data.userId, 
+        // userId is no longer stored, remove if not needed
         period: data.period,
         goalId: data.goalId,
         identifiedAt: identifiedAtISO,
@@ -165,7 +160,7 @@ export async function getPotentialRiskById(id: string, uprId: string, period: st
         id: docSnap.id, 
         ...data, 
         uprId: data.uprId,
-        userId: data.userId,
+        // userId is no longer stored, remove if not needed
         period: data.period,
         goalId: data.goalId,
         identifiedAt: identifiedAtISO,
@@ -184,7 +179,7 @@ export async function getPotentialRiskById(id: string, uprId: string, period: st
   }
 }
 
-export async function updatePotentialRisk(id: string, data: Partial<Omit<PotentialRisk, 'id' | 'uprId' | 'userId' | 'period' | 'goalId' | 'identifiedAt' | 'sequenceNumber'>>): Promise<void> {
+export async function updatePotentialRisk(id: string, data: Partial<Omit<PotentialRisk, 'id' | 'uprId' | 'period' | 'goalId' | 'identifiedAt' | 'sequenceNumber'>>): Promise<void> {
   try {
     const docRef = doc(db, POTENTIAL_RISKS_COLLECTION, id);
     const updateData = {

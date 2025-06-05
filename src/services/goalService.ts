@@ -31,22 +31,17 @@ export interface GoalsResult {
 }
 
 export async function addGoal(
-  goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'period' | 'userId' | 'uprId'>,
+ goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'period' | 'uprId'>,
   uprId: string, // Added uprId
   period: string,
-  userId: string // This is the actual Firebase UID of the user creating the goal
 ): Promise<Goal> {
-  if (!uprId || typeof uprId !== 'string' || uprId.trim() === "") {
+  if (!uprId || typeof uprId !== 'string' || uprId.trim() === '') {
     console.error("[goalService] addGoal: uprId is invalid.", {uprId});
     throw new Error("UPR ID tidak valid untuk menambahkan sasaran.");
   }
   if (!period || typeof period !== 'string' || period.trim() === "") {
     console.error("[goalService] addGoal: period is invalid.", {period});
     throw new Error("Periode tidak valid untuk menambahkan sasaran.");
-  }
-  if (!userId || typeof userId !== 'string' || userId.trim() === "") {
-    console.error("[goalService] addGoal: userId (creator) is invalid.", {userId});
-    throw new Error("User ID (pembuat) tidak valid untuk menambahkan sasaran.");
   }
 
   try {
@@ -81,8 +76,6 @@ export async function addGoal(
     const docData = {
       ...goalData,
       uprId, // Store uprId
-      period,
-      userId, // Store creator's Firebase UID
       code: newGoalCode,
       createdAt: serverTimestamp()
     };
@@ -94,7 +87,6 @@ export async function addGoal(
         ...goalData,
         uprId,
         period,
-        userId,
         code: newGoalCode,
         createdAt: new Date().toISOString() 
     };
@@ -141,7 +133,6 @@ export async function getGoals(uprId: string | null | undefined, period: string 
         code: data.code || '', 
         createdAt: createdAtISO,
         uprId: data.uprId, // Ensure uprId is included
-        userId: data.userId, // User who created/owns this goal record
         period: data.period,
       } as Goal);
     });
@@ -191,7 +182,6 @@ export async function getGoalById(goalId: string, uprId: string, period: string)
         code: data.code || '',
         createdAt: createdAtISO,
         uprId: data.uprId,
-        userId: data.userId,
         period: data.period,
       } as Goal;
     } else {
@@ -205,8 +195,7 @@ export async function getGoalById(goalId: string, uprId: string, period: string)
   }
 }
 
-export async function updateGoal(goalId: string, updatedData: Partial<Omit<Goal, 'id' | 'uprId' | 'userId' | 'period' | 'code' | 'createdAt'>>): Promise<void> {
-  // Note: uprId, userId, period, code, createdAt should not be updatable through this generic update.
+export async function updateGoal(goalId: string, updatedData: Partial<Omit<Goal, 'id' | 'uprId' | 'period' | 'code' | 'createdAt'>>): Promise<void> {
   // If uprId/period needs to change, it implies moving the goal, which is a more complex operation.
   try {
     const goalRef = doc(db, GOALS_COLLECTION, goalId);
@@ -223,7 +212,6 @@ export async function updateGoal(goalId: string, updatedData: Partial<Omit<Goal,
 }
 
 export async function deleteGoal(goalId: string, uprId: string, period: string): Promise<void> {
-  // userId (creator) is not needed for deletion query if we are basing on uprId and period context
   const batch = writeBatch(db);
   try {
     const goalRef = doc(db, GOALS_COLLECTION, goalId);

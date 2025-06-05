@@ -27,22 +27,20 @@ export async function addRiskCause(
   potentialRiskId: string,
   goalId: string,
   uprId: string, // Added uprId
-  period: string,
-  userId: string, // Creator's Firebase UID
+  period: string, // Creator's Firebase UID - Removed userId parameter
   sequenceNumber: number
 ): Promise<RiskCause> {
-  if (!uprId || !period || !userId || !potentialRiskId || !goalId) {
-    console.error("[riskCauseService] addRiskCause: Missing one or more IDs.", {uprId, period, userId, potentialRiskId, goalId});
-    throw new Error("ID UPR, Periode, User, Potensi Risiko, atau Sasaran tidak valid.");
+  if (!uprId || !period || !potentialRiskId || !goalId) {
+    console.error("[riskCauseService] addRiskCause: Missing one or more IDs.", {uprId, period, potentialRiskId, goalId});
+    throw new Error("ID UPR, Periode, Potensi Risiko, atau Sasaran tidak valid.");
   }
   try {
     const docRef = await addDoc(collection(db, RISK_CAUSES_COLLECTION), {
       ...data,
       potentialRiskId,
       goalId,
-      uprId, // Store uprId
-      period,
-      userId, // Store creator's Firebase UID
+      uprId,
+      period, // No longer storing userId directly
       sequenceNumber,
       createdAt: serverTimestamp(),
       keyRiskIndicator: data.keyRiskIndicator || null,
@@ -56,8 +54,7 @@ export async function addRiskCause(
       potentialRiskId,
       goalId,
       uprId,
-      period,
-      userId,
+      period, // userId is not stored in the returned object anymore
       sequenceNumber,
       createdAt: new Date().toISOString(), 
     };
@@ -68,7 +65,7 @@ export async function addRiskCause(
   }
 }
 
-export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, uprId: string, period: string, userIdForContextValidation?: string): Promise<RiskCause[]> {
+export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, uprId: string, period: string): Promise<RiskCause[]> {
   if (!uprId || !period || !potentialRiskId) {
     console.warn(`[riskCauseService] getRiskCausesByPotentialRiskId: uprId, period, or potentialRiskId is missing.`);
     return [];
@@ -96,7 +93,7 @@ export async function getRiskCausesByPotentialRiskId(potentialRiskId: string, up
         id: doc.id, 
         ...data,
         uprId: data.uprId,
-        userId: data.userId, // User who created/owns this RC record
+        // userId is not needed here
         period: data.period,
         createdAt: createdAtISO, 
         analysisUpdatedAt: analysisUpdatedAtISO,
@@ -143,7 +140,7 @@ export async function getRiskCauseById(id: string, uprId: string, period: string
         id: docSnap.id, 
         ...data, 
         uprId: data.uprId,
-        userId: data.userId,
+        // userId is not needed here
         period: data.period,
         createdAt: createdAtISO, 
         analysisUpdatedAt: analysisUpdatedAtISO,
@@ -162,7 +159,7 @@ export async function getRiskCauseById(id: string, uprId: string, period: string
   }
 }
 
-export async function updateRiskCause(id: string, data: Partial<Omit<RiskCause, 'id' | 'uprId' | 'potentialRiskId' | 'goalId' | 'userId' | 'period' | 'createdAt' | 'sequenceNumber'>>): Promise<void> {
+export async function updateRiskCause(id: string, data: Partial<Omit<RiskCause, 'id' | 'uprId' | 'potentialRiskId' | 'goalId' | 'period' | 'createdAt' | 'sequenceNumber'>>): Promise<void> {
   // uprId, potentialRiskId, goalId, userId, period, createdAt, sequenceNumber are generally not updatable this way.
   try {
     const docRef = doc(db, RISK_CAUSES_COLLECTION, id);

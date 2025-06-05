@@ -42,7 +42,7 @@ export async function deleteMonitoredControlMeasuresBySession(monitoringSessionI
 
 
 export async function addMonitoringSession(
-  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'period' | 'uprId'>,
+  data: Omit<MonitoringSession, 'id' | 'createdAt' | 'updatedAt' | 'period' | 'uprId'>,
   uprId: string, // Added uprId
   period: string, 
   userId: string // Creator's Firebase UID
@@ -61,7 +61,6 @@ export async function addMonitoringSession(
       ...data,
       uprId, // Store uprId
       period,
-      userId, // Store creator's Firebase UID
       status: data.status || 'Direncanakan', 
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -82,7 +81,6 @@ export async function addMonitoringSession(
       ...data,
       uprId,
       period,
-      userId,
       status: newDocData.status as MonitoringSession['status'],
       createdAt: createdAtTimestamp.toISOString(),
       updatedAt: updatedAtTimestamp.toISOString(),
@@ -120,7 +118,6 @@ export async function getMonitoringSessions(uprId: string, period: string, userI
       sessions.push({ 
         id: docSnap.id,
         uprId: data.uprId,
-        userId: data.userId, // User who created this session
         period: data.period,
         name: data.name,
         startDate,
