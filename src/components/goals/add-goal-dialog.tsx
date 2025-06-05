@@ -32,12 +32,16 @@ interface AddGoalDialogProps {
   onGoalSave: (goalData: GoalFormData, existingGoalId?: string) => Promise<void>;
   existingGoal?: Goal | null;
   triggerButton?: React.ReactNode;
+  existingGoals?: Goal[]; // Digunakan hanya untuk referensi UI jika perlu, tidak untuk logika inti
+  // currentUprId dan currentPeriod tidak lagi diperlukan sebagai prop
+  // jika operasi save mengandalkan konteks aktif dari store yang di-set oleh halaman GoalsPage
 }
 
 export function AddGoalDialog({ 
   onGoalSave, 
   existingGoal, 
   triggerButton,
+  existingGoals = [], // Default ke array kosong
 }: AddGoalDialogProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -141,3 +145,5 @@ export function AddGoalDialog({
     </Dialog>
   );
 }
+
+    

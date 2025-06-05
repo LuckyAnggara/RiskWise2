@@ -12,14 +12,12 @@ interface GoalCardProps {
   goal: Goal;
   onEditGoal: (goalData: Omit<Goal, 'id' | 'code' | 'createdAt' | 'uprId' | 'period' | 'userId'>, existingGoalId: string) => void;
   onDeleteGoal: (goalId: string) => void;
-  currentUprId: string; // Added
-  currentPeriod: string; // Added
+  // currentUprId dan currentPeriod tidak lagi diperlukan di sini
+  // karena operasi save/delete akan menggunakan konteks dari store yang sudah di-align
+  // oleh halaman GoalsPage
 }
 
-export function GoalCard({ goal, onEditGoal, onDeleteGoal, currentUprId, currentPeriod }: GoalCardProps) {
-  // Risk count will now need to be fetched or managed separately if displayed here
-  // For now, we remove the direct riskCount prop display.
-  console.info(goal.id)
+export function GoalCard({ goal, onEditGoal, onDeleteGoal }: GoalCardProps) {
   return (
     <Card className="flex flex-col">
       <CardHeader>
@@ -29,9 +27,10 @@ export function GoalCard({ goal, onEditGoal, onDeleteGoal, currentUprId, current
              <AddGoalDialog 
                 existingGoal={goal} 
                 onGoalSave={(data) => onEditGoal(data, goal.id)}
-                currentUprId={currentUprId} // Pass down
-                currentPeriod={currentPeriod} // Pass down
-                existingGoals={[]} // existingGoals is only for code generation, not strictly needed for edit
+                // currentUprId and currentPeriod are not needed if AddGoalDialog also relies on store's active context
+                // or if the parent (GoalsPage) ensures the store context is set before calling onEditGoal.
+                // For simplicity, we assume AddGoalDialog (or its consumer) handles context.
+                existingGoals={[]} // existingGoals is for code generation, not strictly needed for edit action via card
                 triggerButton={
                   <Button variant="ghost" size="icon" aria-label={`Edit sasaran ${goal.name} (${goal.code})`}>
                     <Edit className="h-4 w-4" />
@@ -64,3 +63,4 @@ export function GoalCard({ goal, onEditGoal, onDeleteGoal, currentUprId, current
     </Card>
   );
 }
+    
