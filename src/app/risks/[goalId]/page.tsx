@@ -58,7 +58,7 @@ export default function GoalRisksPage() {
 
   const { toast } = useToast();
   
-  const currentUprId = useMemo(() => appUser?.uid || null, [appUser]);
+  const currentUprId = useMemo(() => appUser?.uprId || null, [appUser]);
   const currentPeriod = useMemo(() => appUser?.activePeriod || DEFAULT_PERIOD, [appUser]);
 
   const loadData = useCallback(async () => {
@@ -72,33 +72,38 @@ export default function GoalRisksPage() {
     }
     setIsLoading(true);
     try {
-      console.info(appUser);
-      const currentGoalResult = await getGoalById(goalId,currentUprId, currentPeriod); 
+      // Fetch goal using currentUprId (derived from appUser.uprId) and currentPeriod
+      const currentGoalResult = await getGoalById(goalId, currentUprId, currentPeriod); 
 
       const uniqueOwners = new Set<string>();
       const causeCounts: Record<string,number> = {};
 
-      if (currentGoalResult && currentGoalResult.userId === currentUprId && currentGoalResult.period === currentPeriod) {
+      // Validate if the fetched goal matches the context
+      if (currentGoalResult && currentGoalResult.uprId === currentUprId && currentGoalResult.period === currentPeriod) {
         setGoal(currentGoalResult);
         const currentPotentialRisks = await getPotentialRisksByGoalId(goalId, currentUprId, currentPeriod);
         setPotentialRisks(currentPotentialRisks);
         for (const pRisk of currentPotentialRisks) {
           if (pRisk.owner) uniqueOwners.add(pRisk.owner);
+          // Pass currentUprId and currentPeriod to fetch risk causes, ensuring context consistency
           const causes = await getRiskCausesByPotentialRiskId(pRisk.id, currentUprId, currentPeriod);
           causeCounts[pRisk.id] = causes.length;
         }
       } else if (currentGoalResult) { 
+        // Goal found but doesn't match context (e.g., wrong UPR/period)
         toast({
           title: "Konteks Tidak Cocok",
-          description: `Sasaran "${currentGoalResult.name}" tidak termasuk dalam UPR/Periode aktif saat ini.`,
+          description: `Sasaran "${currentGoalResult.name}" (ID: ${goalId}) tidak termasuk dalam konteks UPR ${currentUprId} dan periode ${currentPeriod} yang aktif.`,
           variant: "warning",
+          duration: 7000,
         });
         setGoal(null); 
         setPotentialRisks([]);
       } else { 
+         // Goal not found at all for the given ID, UPR, and Period
          setGoal(null);
          setPotentialRisks([]);
-         toast({title: "Sasaran Tidak Ditemukan", description: `Sasaran dengan ID ${goalId} tidak ditemukan.`, variant: "destructive"});
+         toast({title: "Sasaran Tidak Ditemukan", description: `Sasaran dengan ID ${goalId} tidak ditemukan dalam konteks UPR ${currentUprId} dan periode ${currentPeriod}.`, variant: "destructive"});
          router.push("/goals");
       }
       setAllRiskOwnersForGoal(Array.from(uniqueOwners).sort());
@@ -114,14 +119,25 @@ export default function GoalRisksPage() {
   }, [goalId, currentUprId, currentPeriod, currentUser, toast, router]);
 
   useEffect(() => {
-    if (currentUser && currentUprId && currentPeriod && goalId) {
+    // Ensure all necessary context from appUser is available before loading data
+    if (currentUser && appUser && appUser.uprId && appUser.activePeriod && goalId) {
       loadData();
     } else if (!authLoading && !currentUser) {
-      setIsLoading(false);
-    } else if (currentUser && (!currentUprId || !currentPeriod || !goalId) && !authLoading && appUser !== undefined) {
-      setIsLoading(true);
+      setIsLoading(false); 
+      router.push('/login'); 
+    } else if (currentUser && appUser && (!appUser.uprId || !appUser.activePeriod) && !authLoading) {
+        // User is logged in, appUser profile exists, but uprId or activePeriod is missing.
+        setIsLoading(false);
+        toast({ title: "Konteks Tidak Lengkap", description: "UPR atau periode aktif pengguna tidak ditemukan. Harap periksa pengaturan profil Anda.", variant: "warning"});
+        router.push('/settings');
+    } else if (currentUser && !goalId && !authLoading) { // Goal ID is missing
+        setIsLoading(false);
+        toast({ title: "ID Sasaran Hilang", description: "Tidak ada ID sasaran yang diberikan untuk ditampilkan.", variant: "destructive"});
+        router.push('/goals');
     }
-  }, [loadData, currentUprId, currentPeriod, goalId, currentUser, authLoading, appUser]);
+    // else, if authLoading or appUser is still loading, isLoading remains true or is handled by the initial state.
+  }, [loadData, currentUser, appUser, authLoading, goalId, router, toast]);
+
 
   const handlePotentialRisksIdentified = (newlyCreatedPRsFromAI: PotentialRisk[]) => {
     if (!goal) return;
@@ -133,7 +149,10 @@ export default function GoalRisksPage() {
   };
   
   const handleDeleteSingleRisk = (pRisk: PotentialRisk) => {
-    if(!currentUser) return;
+    if(!currentUser || !currentUprId || !currentPeriod) {
+      toast({ title: "Aksi Dibatalkan", description: "Konteks pengguna tidak lengkap.", variant: "warning"});
+      return;
+    }
     setRiskToDelete(pRisk);
     setIsSingleDeleteDialogOpen(true);
   };
@@ -193,7 +212,7 @@ export default function GoalRisksPage() {
   };
 
   const handleDeleteSelectedRisks = () => {
-    if (!currentUser || selectedRiskIds.length === 0) {
+    if (!currentUser || !currentUprId || !currentPeriod || selectedRiskIds.length === 0) {
         toast({ title: "Tidak Ada Risiko Dipilih", description: "Harap pilih setidaknya satu risiko untuk dihapus.", variant: "destructive" });
         return;
     }
@@ -245,13 +264,14 @@ export default function GoalRisksPage() {
         const existingPRsForGoal = await getPotentialRisksByGoalId(goal.id, currentUprId, currentPeriod);
         const newSequenceNumber = existingPRsForGoal.length + 1;
 
-        const newPRData: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'uprId' | 'period' | 'userId' | 'sequenceNumber'> = {
-            goalId: riskToDuplicate.goalId,
+        const newPRData: Omit<PotentialRisk, 'id' | 'identifiedAt' | 'userId' | 'period' | 'sequenceNumber' | 'uprId' | 'goalId'> = {
             description: `${riskToDuplicate.description} (Salinan)`,
             category: riskToDuplicate.category,
             owner: riskToDuplicate.owner,
         };
-        const newPotentialRisk = await addPotentialRisk(newPRData, goal.id, currentUprId, currentPeriod,  newSequenceNumber);
+        // For addPotentialRisk service, creatorUserId is currentUprId IF data is owned by UPR, or currentUser.uid if creator matters separately
+        // Assuming here, the creator for a duplicated risk is the current user, and it belongs to the current active UPR.
+        const newPotentialRisk = await addPotentialRisk(newPRData, goal.id, currentUprId, currentPeriod, currentUser.uid, newSequenceNumber);
         
         toast({ title: "Risiko Diduplikasi", description: `Potensi risiko "${newPotentialRisk.description}" telah berhasil diduplikasi. Penyebab dan kontrol belum disalin.`});
         loadData(); 
@@ -278,6 +298,7 @@ export default function GoalRisksPage() {
   }
   
   if (!currentUser && !authLoading) {
+     // Handled by useEffect redirect
     return null; 
   }
 
@@ -291,10 +312,11 @@ export default function GoalRisksPage() {
   }
   
   if (!goal && !isLoading) { 
+    // Error message is shown by loadData via toast, useEffect handles redirect
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
+       <div className="flex flex-col items-center justify-center h-screen">
         <ShieldAlert className="w-16 h-16 text-muted-foreground mb-4" />
-        <p className="text-xl text-muted-foreground">Sasaran tidak ditemukan untuk ID: {goalId}, UPR: {currentUprId || '...'}, Periode: {currentPeriod || '...'}.</p>
+        <p className="text-xl text-muted-foreground">Mengalihkan atau menunggu data sasaran...</p>
         <Button onClick={() => router.push('/goals')} className="mt-4">
           <ArrowLeft className="mr-2 h-4 w-4" /> Kembali ke Sasaran
         </Button>
@@ -316,7 +338,7 @@ export default function GoalRisksPage() {
             <Button onClick={() => router.push('/goals')} variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" /> Kembali ke Sasaran
             </Button>
-            {currentUser && goal && (
+            {currentUser && goal && currentUprId && currentPeriod && ( // Check currentUprId and currentPeriod
               <NextLink href={`/all-risks/manage/new?goalId=${goal.id}&from=${encodeURIComponent(`/risks/${goal.id}`)}`} passHref>
                 <Button>
                   <PlusCircle className="mr-2 h-4 w-4" /> Tambah Potensi Risiko Baru
@@ -327,11 +349,13 @@ export default function GoalRisksPage() {
         }
       />
 
-      <RiskIdentificationCard 
-        goal={goal} 
-        onPotentialRisksIdentified={handlePotentialRisksIdentified} 
-        existingPotentialRisksCount={potentialRisks.length}
-      />
+      {goal && currentUprId && currentUser && ( // Ensure goal, UPR context, and user exist for AI card
+          <RiskIdentificationCard 
+            goal={goal} 
+            onPotentialRisksIdentified={handlePotentialRisksIdentified} 
+            existingPotentialRisksCount={potentialRisks.length}
+          />
+      )}
       
       <Separator />
 
@@ -627,5 +651,3 @@ export default function GoalRisksPage() {
   );
 }
 
-
-    
